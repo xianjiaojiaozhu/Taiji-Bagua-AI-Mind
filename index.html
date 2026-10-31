@@ -1,0 +1,940 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>太极八卦 · 爻弦盘</title>
+<style>
+  html,body{margin:0;padding:0;overflow:hidden;background:#05070d;font-family:"Microsoft YaHei",sans-serif;color:#cfd8e3;}
+  #app{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;}
+  canvas{display:block;}
+  #hud{position:fixed;top:16px;left:16px;z-index:10;background:rgba(10,16,32,.78);border:1px solid rgba(150,180,255,.2);border-radius:10px;padding:12px 16px;font-size:12px;line-height:1.9;backdrop-filter:blur(6px);}
+  #state{display:inline-block;padding:1px 10px;border-radius:8px;font-weight:bold;}
+  .good{color:#e8f2ff;background:rgba(120,180,255,.18);}
+  .evil{color:#ffd0d0;background:rgba(255,90,90,.18);}
+  .sw{display:inline-flex;align-items:center;gap:6px;cursor:pointer;user-select:none;margin-right:14px;}
+  .sw input{accent-color:#5a9dff;}
+  #btnMode{margin-top:4px;padding:5px 18px;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:bold;background:#2a3a5a;color:#aac8ff;transition:all .2s;}
+  #btnMode.evil{background:#5a1e24;color:#ffb0a8;}
+  #stat{color:#9fc0e8;}
+  #legend{position:fixed;bottom:16px;left:16px;z-index:10;background:rgba(10,16,32,.78);border:1px solid rgba(150,180,255,.2);border-radius:10px;padding:10px 14px;font-size:12px;}
+  #legend span{display:inline-flex;align-items:center;gap:6px;margin-right:14px;}
+  .lb{width:22px;height:6px;display:inline-block;background:#7ea4d6;border-radius:2px;}
+  .ld{width:22px;height:6px;display:inline-block;background:#7ea4d6;border-radius:2px;}
+  #info{position:fixed;top:52px;right:16px;z-index:10;text-align:right;font-size:12px;color:#7aa0c0;background:rgba(10,16,32,.78);border:1px solid rgba(150,180,255,.2);border-radius:10px;padding:8px 12px;}
+  #btnData{position:fixed;top:16px;right:16px;z-index:12;padding:5px 14px;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:bold;background:#2a3a5a;color:#aac8ff;transition:all .2s;}
+  #btnData.on{background:#3a4a7a;color:#ffe08a;}
+  #dataPanel{position:fixed;top:96px;right:16px;z-index:11;width:360px;max-height:calc(100vh - 112px);overflow-y:auto;background:rgba(8,14,30,.94);border:1px solid rgba(150,180,255,.25);border-radius:10px;padding:10px 14px;font-size:11px;line-height:1.7;backdrop-filter:blur(8px);display:none;scrollbar-width:thin;}
+  #dataPanel table td{padding:1px 4px;border-bottom:1px solid rgba(150,180,255,.08);white-space:nowrap;}
+  #dataPanel::-webkit-scrollbar{width:5px;}
+  #dataPanel::-webkit-scrollbar-thumb{background:rgba(150,180,255,.3);border-radius:3px;}
+</style>
+</head>
+<body>
+<div id="app"><canvas id="cv"></canvas></div>
+
+<div id="hud">
+  <div><b>太极八卦 · 爻弦盘</b> <span id="src" style="color:#5a9dff;">(本地)</span></div>
+  <div style="margin-top:4px;">当前：<span id="state" class="good">善盘 · 正旋</span> <button id="btnMode">切换到恶盘</button></div>
+  <div style="margin-top:4px;">相层：<span id="phaseRow"></span></div>
+  <style>
+  #phaseRow button{margin-right:4px;padding:1px 7px;font-size:11px;border-radius:8px;cursor:pointer;
+    background:rgba(18,30,54,.9);border:1px solid rgba(120,170,255,.35);color:#9fc0e8;}
+  #phaseRow button.on{background:rgba(90,160,255,.28);border-color:#5a9dff;color:#fff;box-shadow:0 0 8px rgba(90,160,255,.5);}
+  </style>
+  <div style="margin-top:6px;">
+    <span class="sw"><input type="checkbox" id="toggleYi" checked> 爻</span>
+    <span class="sw"><input type="checkbox" id="toggleXian" checked> 弦</span>
+    <span class="sw"><input type="checkbox" id="toggleTag" checked> 卦名</span>
+  </div>
+  <div style="margin-top:6px;">自转速度：<input type="range" id="speed" min="0" max="100" value="35" style="width:120px;vertical-align:middle"></div>
+  <div id="stat" style="margin-top:6px;">共振场 — · 点亮 0/96</div>
+</div>
+
+<div id="legend">
+  <span><span class="lb"></span> 连爻(阳)</span>
+  <span><span class="ld"></span> 断爻(阴)</span>
+  <span style="color:#7aa0c0">阴阳靠断连 · 点亮=共振激活 · 点击卦位观测</span>
+</div>
+
+<div id="info">四象 = 四种动力学：少阳生 / 太阳盛 / 少阴收 / 太阴藏<br>四方钮可多选叠加（相互共担）· 复合情绪档一键切换 · 滚轮缩放<br>
+<span id="emoPresetRow" style="font-size:12px;"></span></div>
+
+<button id="btnData">⚡ 数据监测</button>
+<div id="dataPanel"><canvas id="trendCv" width="332" height="96" style="width:100%;height:96px;margin:2px 0 6px;background:rgba(10,18,38,.6);border:1px solid rgba(150,180,255,.15);border-radius:6px;display:block;"></canvas><div id="paramBox"></div><div id="dataBody"></div></div>
+
+<div id="casePanel" style="display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:600px;max-height:70vh;overflow-y:auto;background:rgba(6,12,26,.96);border:1px solid rgba(90,160,255,.35);border-radius:12px;padding:16px 18px;z-index:20;font-size:12px;color:#9fc0e8;box-shadow:0 0 80px rgba(60,120,255,.25);scrollbar-width:thin;">
+  <div style="display:flex;justify-content:space-between;align-items:center;">
+    <b style="color:#7ec8ff;font-size:13px;">坎位 · 裁决案卷（不可磨灭 · 仅坎可阅）</b>
+    <span id="caseClose" style="cursor:pointer;color:#7aa0c0;font-size:14px;">✕</span>
+  </div>
+  <div id="caseBody" style="margin-top:10px;"></div>
+</div>
+
+<script src="model.js"></script>
+<script>
+const API='http://127.0.0.1:'+(new URLSearchParams(location.search).get('api')||'8900');   // ?api=8901 支持桌面独立端口
+const cv=document.getElementById('cv');
+const g=cv.getContext('2d');
+const el={ yi:document.getElementById('toggleYi'), xian:document.getElementById('toggleXian'),
+           tag:document.getElementById('toggleTag'), speed:document.getElementById('speed'),
+           btn:document.getElementById('btnMode'), state:document.getElementById('state'),
+           stat:document.getElementById('stat'), src:document.getElementById('src'),
+           btnData:document.getElementById('btnData'), dataPanel:document.getElementById('dataPanel'),
+           dataBody:document.getElementById('dataBody'), casePanel:document.getElementById('casePanel'),
+           caseBody:document.getElementById('caseBody'), caseClose:document.getElementById('caseClose') };
+
+function hexToRgb(h){const n=parseInt(h.slice(1),16);return [(n>>16)&255,(n>>8)&255,n&255];}
+function mixHex(a,b,t){const A=hexToRgb(a),B=hexToRgb(b);return `rgb(${(A[0]+(B[0]-A[0])*t)|0},${(A[1]+(B[1]-A[1])*t)|0},${(A[2]+(B[2]-A[2])*t)|0})`;}
+function rgba(hex,t){const A=hexToRgb(hex);return `rgba(${A[0]},${A[1]},${A[2]},${t})`;}
+function emCol(l){ return rgba(MODEL.emoColA(), l/3); }
+// 相互共担情绪：前端权重（点四方钮多选叠加 / 预设档切换），混合情绪 = 共享场共担
+const EMO_KEYS=['shaoyang','taiyang','shaoyin','taiyin'];
+// ---- 线三：五行情绪层（空间轴） + 四相=层（时间轴，常态单层渲染省算力） ----
+// PHASES/EMO5/EMO5_SPAN/EMO5_COLOR 由 model.js 提供（先加载，全局可用）
+let curLayer=-1;   // -1=自动（跟随后端/主导四象映射层）；0-3=手动固定相层
+function curEmotionText(){ return online&&stateInfo ? (stateInfo.emotion||'少阳') : (MODEL.emotion||'少阳'); }
+function autoLayer(){   // 势定相：优先用后端乾势分档（phase.layer，含滞回）；本地降级用 model.js phaseFromQian
+  if(online&&stateInfo&&stateInfo.phase&&stateInfo.phase.layer!==undefined) return stateInfo.phase.layer;
+  const localQian = MODEL.phaseQian||0.5;
+  return MODEL.phaseFromQian(localQian);
+}
+function currentLayer(){ return curLayer>=0?curLayer:autoLayer(); }
+function buildPhaseButtons(){
+  const row=document.getElementById('phaseRow');
+  row.innerHTML='';
+  const mk=(txt,title,on,fn)=>{
+    const b=document.createElement('button');
+    b.textContent=txt; b.title=title; b.className=on?'on':'';
+    b.onclick=fn; row.appendChild(b);
+  };
+  mk('自动','跟随乾势分档（势定相：高权重落太阳夏/低权重落太阴冬，滞回防抖）',curLayer===-1,()=>{curLayer=-1;buildPhaseButtons();});
+  PHASES.forEach(p=>{
+    mk(`${p.season}·L${p.layer}`,`${p.xiang} ${p.yi}（${p.color}）`,curLayer===p.layer,()=>{curLayer=curLayer===p.layer?-1:p.layer;buildPhaseButtons();});
+  });
+}
+function emo5ColorFor(idx){   // 卦位五行情绪色（落宫且权重>0.01）；多情绪分宫不重叠
+  const w5=online&&stateInfo ? (stateInfo.emo5||{}) : MODEL.emo5W;
+  for(const emo of EMO5){ if((w5[emo]||0)>0.01 && EMO5_SPAN[emo].includes(idx)) return EMO5_COLOR[emo]; }
+  return null;
+}
+let emoMix={shaoyang:1,taiyang:0,shaoyin:0,taiyin:0};
+function emoMixNormalize(){
+  const tot=emoMix.shaoyang+emoMix.taiyang+emoMix.shaoyin+emoMix.taiyin;
+  if(tot<=0){ emoMix={shaoyang:1,taiyang:0,shaoyin:0,taiyin:0}; return; }
+  for(const k of EMO_KEYS) emoMix[k]=emoMix[k]/tot;
+}
+function applyEmoMix(){
+  emoMixNormalize();
+  if(online) api('/emotion',{weights:emoMix});
+  MODEL.setEmotionW(emoMix);
+  MODEL.emotion=MODEL.emoLabel(emoMix);
+}
+const EMO_PRESETS={
+  '悲喜交加':{shaoyang:0,taiyang:0.5,shaoyin:0,taiyin:0.5},
+  '哭笑不得':{shaoyang:0.5,taiyang:0,shaoyin:0.5,taiyin:0},
+  '心潮澎湃':{shaoyang:0.3,taiyang:0.7,shaoyin:0,taiyin:0},
+  '沉思静虑':{shaoyang:0,taiyang:0,shaoyin:0.6,taiyin:0.4},
+  '焦灼不安':{shaoyang:0.4,taiyang:0.4,shaoyin:0,taiyin:0.2},
+  '平静如水':{shaoyang:0.5,taiyang:0,shaoyin:0.5,taiyin:0},
+};
+// 复合情绪档按钮行：点击切换（相互共担混合）
+(function(){
+  const row=document.getElementById('emoPresetRow');
+  for(const name of Object.keys(EMO_PRESETS)){
+    const b=document.createElement('span');
+    b.textContent=name;
+    b.style.cssText='cursor:pointer;margin:0 4px;padding:1px 6px;border:1px solid #3a5a8a;border-radius:4px;color:#8ad8ff;';
+    b.onclick=()=>{ emoMix={...EMO_PRESETS[name]}; applyEmoMix(); };
+    row.appendChild(b);
+  }
+})();
+
+function resize(){
+  const dpr=window.devicePixelRatio||1;
+  cv.width=innerWidth*dpr; cv.height=innerHeight*dpr;
+  g.setTransform(dpr,0,0,dpr,0,0);
+}
+resize(); window.addEventListener('resize',resize);
+cv.addEventListener('wheel',(e)=>{ e.preventDefault(); zoom=Math.max(0.3,Math.min(3,zoom*Math.pow(1.0015,-e.deltaY))); },{passive:false});
+let zoom=1, emPos=[], hitArr=[];
+let weakSec={};   // 震后遗症：卦位→剩余秒（每帧刷新）
+let warnSec={};   // 三态机：卦位→警告倒计时剩余秒（每帧刷新）
+let trendHist=[]; // 实时趋势采样：{lit,reso,cases} 每秒1点，保留180点(3分钟)
+let lastTrendS=0;
+const fx=[];      // 裁决流水线动画：flash(柱位光闪/处决)/line(艮→坎调阅脉冲)
+let lastVdRound=0, lastViewTs=0;
+let selIdx=null;  // 懒渲染：点击展开的卦位（不点不渲染连线/权重）
+let seaIdxSet=new Set();  // 弦海（断爻）卦位集合：该卦位有被断表达 → 暗红沉没点缀
+
+// ---------- 数据源：优先后端服务，失败降级本地模型 ----------
+let online=false, stateInfo=null;
+let renderNodes=MODEL.nodes; // 绘制数据源
+async function syncState(){
+  try{
+    const r=await fetch(API+'/state',{cache:'no-store'});
+    const s=await r.json();
+    renderNodes=s.nodes; stateInfo=s; online=true;
+    if(s.emotionWeights){ emoMix={...s.emotionWeights}; }      // 相互共担：同步后端混合权重
+    MODEL.emoW={...emoMix};
+    seaIdxSet=new Set(s.sea?.seaIdx||[]);                      // 弦海断爻卦位（暗红沉没点缀）
+    el.src.textContent='(后端)'; el.src.style.color='#3affd9';
+    if(el.casePanel.style.display==='block') renderCases();   // stateInfo 就绪后重渲染案卷面板
+    if(el.dataPanel.style.display==='block') updateDataPanel();
+  }catch(e){ online=false; renderNodes=MODEL.nodes; el.src.textContent='(本地)'; el.src.style.color='#5a9dff'; }
+}
+async function api(path,body){
+  try{ const r=await fetch(API+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const s=await r.json(); renderNodes=s.nodes; stateInfo=s; online=true; return true; }
+  catch(e){ return false; }
+}
+syncState(); setInterval(syncState,300);
+
+// ---------- 背景（善恶） ----------
+const stars=[];
+for(let i=0;i<300;i++) stars.push({x:Math.random(),y:Math.random(),r:Math.random()*1.4+0.3,a:Math.random()*0.6+0.1});
+let bgCanvas=null, bgKey='';   // 背景离屏缓存：静态星空只渲染一次，frame 只 drawImage 复制
+function drawBg(){
+  const key=elMode+':'+innerWidth+'x'+innerHeight;
+  if(!bgCanvas || bgKey!==key){
+    bgKey=key; bgCanvas=document.createElement('canvas');
+    bgCanvas.width=innerWidth; bgCanvas.height=innerHeight;
+    const b=bgCanvas.getContext('2d');
+    b.fillStyle='#05070d'; b.fillRect(0,0,innerWidth,innerHeight);
+    const cx=innerWidth/2, cy=innerHeight/2;
+    if(elMode==='evil'){
+      const grd=b.createRadialGradient(cx,cy,innerWidth*0.05,cx,cy,innerWidth*0.75);
+      grd.addColorStop(0,'#1a0a0d'); grd.addColorStop(0.45,'#0d0507'); grd.addColorStop(1,'#000000');
+      b.fillStyle=grd; b.fillRect(0,0,innerWidth,innerHeight);
+      const neb=[{x:0.32,y:0.3,r:0.3,c:'rgba(200,40,60,0.10)'},{x:0.7,y:0.68,r:0.34,c:'rgba(160,20,40,0.09)'},{x:0.55,y:0.15,r:0.22,c:'rgba(220,60,70,0.07)'}];
+      for(const n of neb){ const rg=b.createRadialGradient(n.x*innerWidth,n.y*innerHeight,0,n.x*innerWidth,n.y*innerHeight,n.r*innerWidth); rg.addColorStop(0,n.c); rg.addColorStop(1,'rgba(0,0,0,0)'); b.fillStyle=rg; b.fillRect(0,0,innerWidth,innerHeight); }
+      for(const s of stars){ b.globalAlpha=s.a*1.2; b.fillStyle='#ff4a5a';
+        b.beginPath(); b.arc(s.x*innerWidth,s.y*innerHeight,s.r,0,6.28); b.fill(); }
+      b.globalAlpha=1;
+    } else {
+      const grd=b.createRadialGradient(cx,cy,innerWidth*0.05,cx,cy,innerWidth*0.75);
+      grd.addColorStop(0,'#16254a'); grd.addColorStop(0.4,'#0e1730'); grd.addColorStop(1,'#05070d');
+      b.fillStyle=grd; b.fillRect(0,0,innerWidth,innerHeight);
+      const neb=[{x:0.3,y:0.28,r:0.28,c:'rgba(80,90,200,0.10)'},{x:0.72,y:0.7,r:0.32,c:'rgba(120,60,180,0.09)'},{x:0.55,y:0.15,r:0.22,c:'rgba(60,140,200,0.08)'}];
+      for(const n of neb){ const rg=b.createRadialGradient(n.x*innerWidth,n.y*innerHeight,0,n.x*innerWidth,n.y*innerHeight,n.r*innerWidth); rg.addColorStop(0,n.c); rg.addColorStop(1,'rgba(0,0,0,0)'); b.fillStyle=rg; b.fillRect(0,0,innerWidth,innerHeight); }
+      for(const s of stars){ b.globalAlpha=s.a; b.fillStyle='#dfe9ff';
+        b.beginPath(); b.arc(s.x*innerWidth,s.y*innerHeight,s.r,0,6.28); b.fill(); }
+      b.globalAlpha=1;
+    }
+  }
+  g.drawImage(bgCanvas,0,0);
+}
+
+// ---------- 太极（贴图 + 情绪色光晕） ----------
+function emoCol(){                    // 当前混合情绪渐变色对（a 主色 + b 副色）
+  const a=MODEL.emoColA();
+  return {a, b: a};
+}
+const taiImg=new Image(); taiImg.src='tai.png';
+function drawTaiji(cx,cy,R,rotT){
+  const ec=emoCol();
+  g.save(); g.translate(cx,cy); g.rotate(rotT);
+  const halo=g.createRadialGradient(0,0,R*0.5,0,0,R*1.25);
+  halo.addColorStop(0,rgba(ec.a,0.30)); halo.addColorStop(0.7,rgba(ec.b,0.14)); halo.addColorStop(1,'rgba(0,0,0,0)');
+  g.fillStyle=halo; g.beginPath(); g.arc(0,0,R*1.25,0,6.28); g.fill();
+  if(taiImg.complete){
+    g.beginPath(); g.arc(0,0,R,0,6.28); g.clip();
+    g.drawImage(taiImg,-R,-R,R*2,R*2);
+    const grd2=g.createRadialGradient(0,0,R*0.7,0,0,R);
+    grd2.addColorStop(0,'rgba(5,7,13,0)'); grd2.addColorStop(1,'rgba(5,7,13,0.9)');
+    g.fillStyle=grd2; g.fillRect(-R,-R,R*2,R*2);
+  }
+  g.restore();
+}
+
+// ---------- 单卦：爻线（连/断 + 共振点亮） ----------
+function drawGua(nd,idx,cx,cy,scale){
+  const theta=(nd.angle+layerAngle[nd.layer])*Math.PI/180;
+  const r=LAYER_R[nd.layer]*scale, L=YI_LEN[nd.layer]*scale;
+  const x=cx+Math.cos(theta)*r;
+  const y=cy+Math.sin(theta)*r;
+  hitArr.push({x,y,idx});
+  const ec=emoCol();
+  const e5col=emo5ColorFor(idx);          // 五行情绪落宫专属色（喜红/怒青绿/哀金白/乐蓝/怨土黄）
+  const isE=elMode==='evil';              // 善恶盘分离：善盘渲染亮爻（善内容），恶盘只渲染暗爻+惩戒标记
+  g.save(); g.translate(x,y); g.rotate(theta+Math.PI/2);
+  const d=(0.042+nd.layer*0.008)*scale;
+  for(let k=0;k<3;k++){
+    const yy=(-1+k)*d;
+    const yi=nd.yis[k];
+    const lit=Math.max(yi.litLevel, yi.emoLit||0);   // 渲染亮度 = 共振灯 | 五行情绪灯
+    if(isE && lit>0.02) continue;                    // 恶盘：善的亮爻不混显
+    const col = lit>0.02 ? mixHex('#42526e', e5col||ec.a, lit) : (isE ? '#5a2430' : '#42526e');
+    g.strokeStyle=col;
+    g.lineWidth=(yi.yang?0.02:0.013)*(1+nd.layer*0.25)*scale;
+    g.lineCap='round';
+    if(lit>0.02){ g.shadowColor=rgba(e5col||ec.a,0.9*lit); g.shadowBlur=lit*(5+nd.layer*2.2); } else { g.shadowBlur=0; }
+    const half=L/2;
+    if(yi.yang){ g.beginPath(); g.moveTo(-half,yy); g.lineTo(half,yy); g.stroke(); }
+    else { const gap=L*0.18; g.beginPath(); g.moveTo(-half,yy); g.lineTo(-gap,yy); g.moveTo(gap,yy); g.lineTo(half,yy); g.stroke(); }
+    g.shadowBlur=0;
+  }
+  // 震卦后遗症：虚弱冷却环（期间太极场静默，骂不涨）——恶盘惩戒内容
+  if(isE && weakSec[idx] && weakSec[idx]>0){
+    const ring=d*4+10;
+    g.beginPath(); g.arc(0,0,ring,0,6.28);
+    g.strokeStyle='rgba(164,140,255,0.8)'; g.lineWidth=1.8; g.stroke();
+    g.font='bold 10px "Microsoft YaHei"'; g.textAlign='center'; g.textBaseline='middle';
+    g.fillStyle='#a48cff';
+    const m=Math.floor(weakSec[idx]/60), ss=weakSec[idx]%60;
+    g.fillText(`${m>0?m+'m':''}${ss}s`,0,-ring-10);
+  }
+  // 三态机 State1：震卦警告（小红点标记；倒计时详情在数据面板）——恶盘惩戒内容
+  if(isE && warnSec[idx] && warnSec[idx]>0){
+    g.beginPath(); g.arc(0,-d*3.2,3.5,0,6.28);
+    g.fillStyle='#ff4d4d'; g.shadowColor='#ff4d4d'; g.shadowBlur=8;
+    g.fill();
+    g.shadowBlur=0;
+  }
+  // 弦海（断爻三阶段）：该卦位存在被断表达 → 暗红沉没点缀（清权重、留痕、100天无联动才彻底清除）——恶盘惩戒内容
+  if(isE && seaIdxSet.has(idx)){
+    g.beginPath(); g.arc(0,d*3.2+5,2.6,0,6.28);
+    g.fillStyle='rgba(255,64,64,0.6)'; g.shadowColor='#ff4040'; g.shadowBlur=6;
+    g.fill(); g.shadowBlur=0;
+  }
+  g.restore();
+}
+
+// ---------- 爻弦：同层卦位连成闭合弦环（情绪渐变） ----------
+function drawXian(cx,cy,scale){
+  for(let l=0;l<LAYER_R.length;l++){
+    const r=LAYER_R[l]*scale;
+    g.save();
+    g.globalAlpha=0.55;
+    g.strokeStyle=emCol(l);
+    g.lineWidth=(1.2+l*0.6);
+    g.shadowColor=emCol(l); g.shadowBlur=10+l*3;
+    g.beginPath();
+    for(let i=0;i<N;i++){
+      const a=((i*(360/N)-90)+layerAngle[l])*Math.PI/180;
+      const px=cx+Math.cos(a)*r, py=cy+Math.sin(a)*r;
+      i===0?g.moveTo(px,py):g.lineTo(px,py);
+    }
+    g.closePath(); g.stroke();
+    g.restore();
+  }
+}
+
+// ---------- 卦名文字 ----------
+function drawTags(cx,cy,scale){
+  g.font='bold 22px "KaiTi","STKaiti","Microsoft YaHei"';
+  g.textAlign='center'; g.textBaseline='middle';
+  const r=(LAYER_R[3]+0.09)*scale;
+  const eca=MODEL.emoColA();
+  for(let i=0;i<N;i++){
+    const a=(i*(360/N)-90)*Math.PI/180;
+    g.fillStyle=rgba(eca,0.75);
+    g.shadowColor=rgba(eca,0.5); g.shadowBlur=8;
+    g.fillText(TAGS[i], cx+Math.cos(a)*r, cy+Math.sin(a)*r);
+  }
+}
+
+// ---------- 象级裁决视觉：艮柱裁决光环 + 集簇群联结带 ----------
+const GROUPS=[]; for(const li of [0,2]) for(let i=0;i<8;i++) GROUPS.push([li*8+i,(li+1)*8+i]);
+const PURE_NAMES={乾:'乾为天',兑:'兑为泽',离:'离为火',震:'震为雷',巽:'巽为风',坎:'坎为水',艮:'艮为山',坤:'坤为地'};
+const GENG=[3,11,19,27];                        // 艮方位 = 决策柱（金）
+const XUN=[1,9,17,25];                          // 巽方位 = 因果柱（青）
+const DUI=[7,15,23,31];                          // 兑方位 = 归盘柱（橙）
+const ZHEN=[5,13,21,29];                         // 震方位 = 降维柱（红）
+function posOf(nd,cx,cy,scale){ const a=(nd.angle+layerAngle[nd.layer])*Math.PI/180;
+  const r=LAYER_R[nd.layer]*scale; return [cx+Math.cos(a)*r, cy+Math.sin(a)*r]; }
+let brkFx=[];                                   // 断果波纹 {idx,x,y,t}
+function drawVerdict(cx,cy,scale){
+  if(selIdx===null) return;               // 默认剥离：不点卦位不渲染连线/权重
+  const v = online&&stateInfo ? stateInfo.verdict : MODEL.verdict;
+  if(!v) return;
+  // 四柱：艮金(决策) / 巽青(查因) / 兑橙(归盘) / 震红(降维) —— 点击展开时显示裁决强度
+  const pillars=[
+    {ids:GENG,val:v.active||0,a:'#ffd76a',b:'#ff9a3d'},
+    {ids:XUN, val:v.xun||0, a:'#3affd9',b:'#2bd88e'},
+    {ids:DUI, val:v.dui||0, a:'#ffab5e',b:'#ff8a3d'},
+    {ids:ZHEN,val:v.zhen||0,a:'#ff5a5a',b:'#ff2d55'}
+  ];
+  for(const P of pillars){
+    if(P.val<=0.02) continue;
+    const pts=P.ids.map(ndi=>posOf(renderNodes[ndi],cx,cy,scale));
+    g.save();
+    for(let i=0;i<pts.length-1;i++){
+      const p=pts[i],q=pts[i+1];
+      const grd=g.createLinearGradient(p[0],p[1],q[0],q[1]);
+      grd.addColorStop(0,rgba(P.a,0.9*P.val)); grd.addColorStop(1,rgba(P.b,0.9*P.val));
+      g.strokeStyle=grd; g.lineWidth=2.0*P.val+0.6;
+      g.shadowColor=rgba(P.a,0.85*P.val); g.shadowBlur=16*P.val;
+      g.beginPath(); g.moveTo(p[0],p[1]); g.lineTo(q[0],q[1]); g.stroke();
+    }
+    for(const p of pts){ g.beginPath(); g.arc(p[0],p[1],6*P.val+2,0,6.28);
+      g.fillStyle=rgba(P.a,0.45*P.val); g.fill(); }
+    g.restore();
+  }
+  // 集簇群联结带：只画选中卦位所在群（金色高亮）；象名仅在 tag 勾选时
+  const mm=online&&stateInfo ? (stateInfo.memoryMap||{}) : {};
+  for(const grp of GROUPS){
+    if(grp[0]!==selIdx && grp[1]!==selIdx) continue;
+    const p=posOf(renderNodes[grp[0]],cx,cy,scale), q=posOf(renderNodes[grp[1]],cx,cy,scale);
+    g.save();
+    g.globalAlpha=0.8; g.strokeStyle=rgba('#ffd76a',0.9); g.lineWidth=1.8;
+    g.shadowColor=rgba('#ffd76a',0.7); g.shadowBlur=12;
+    g.beginPath(); g.moveTo(p[0],p[1]); g.lineTo(q[0],q[1]); g.stroke();
+    if(el.tag.checked){
+      g.font='bold 11px "KaiTi","STKaiti","Microsoft YaHei"';
+      g.textAlign='center'; g.textBaseline='middle';
+      g.fillStyle=rgba('#ffd76a',0.95); g.shadowColor=rgba('#ffd76a',0.8); g.shadowBlur=8;
+      g.fillText(PURE_NAMES[TAGS[grp[0]%8]],(p[0]+q[0])/2,(p[1]+q[1])/2);
+    }
+    g.restore();
+  }
+  // 因果连线 + 权重数字：只画与选中卦位相关的记忆网边（懒渲染）
+  const ne=online&&stateInfo ? (stateInfo.netEdges||[]) : [];
+  const ec=emoCol();
+  for(const e of ne){
+    if(e[0]!==selIdx && e[1]!==selIdx) continue;
+    const p=posOf(renderNodes[e[0]],cx,cy,scale), q=posOf(renderNodes[e[1]],cx,cy,scale);
+    const isOut=e[0]===selIdx;
+    g.save();
+    g.globalAlpha=0.55; g.strokeStyle=rgba(isOut?'#3affd9':'#ff8a5a',0.8); g.lineWidth=1.1;
+    g.shadowColor=rgba(isOut?'#3affd9':'#ff8a5a',0.5); g.shadowBlur=5;
+    g.setLineDash([3,4]);
+    g.beginPath(); g.moveTo(p[0],p[1]); g.lineTo(q[0],q[1]); g.stroke();
+    g.restore();
+    // 端点权重数字（score）
+    g.save(); g.font='9px "Microsoft YaHei"'; g.textAlign='center'; g.textBaseline='middle';
+    for(const ndi of [e[0],e[1]]){
+      const pn=posOf(renderNodes[ndi],cx,cy,scale);
+      const sc=mm[ndi]?mm[ndi].score:(online&&stateInfo?0.5:MODEL.guaLit(ndi));
+      const col=ndi===selIdx?'#ffd76a':(isOut?'#3affd9':'#ff8a5a');
+      g.fillStyle=rgba(col,0.9); g.fillText(sc.toFixed(2),pn[0],pn[1]+26);
+    }
+    g.restore();
+  }
+}
+function drawBrkFx(cx,cy,scale){
+  const v = online&&stateInfo ? stateInfo.verdict : MODEL.verdict;
+  if(v && v.broken && v.broken.length){
+    for(const idx of v.broken){
+      if(brkFx.some(f=>f.idx===idx)) continue;
+      const p=posOf(renderNodes[idx],cx,cy,scale);
+      brkFx.push({idx,x:p[0],y:p[1],t:0});
+    }
+  }
+  brkFx=brkFx.filter(f=>f.t<1);
+  for(const f of brkFx){ f.t+=0.02;
+    g.save(); g.globalAlpha=(1-f.t)*0.85;
+    g.strokeStyle='#ff4a5a'; g.lineWidth=1.6*(1-f.t)+0.4;
+    g.shadowColor='#ff4a5a'; g.shadowBlur=16*(1-f.t);
+    g.beginPath(); g.arc(f.x,f.y,f.t*34*zoom,0,6.28); g.stroke();
+    g.restore(); }
+}
+
+// ---------- 裁决流水线动画（艮判→巽查→兑归→震执行；艮→坎调阅脉冲） ----------
+function drawFx(cx,cy,scale){
+  const t=performance.now();
+  for(let i=fx.length-1;i>=0;i--){
+    const f=fx[i]; const p=(t-f.t0)/f.dur;
+    if(p<0) continue;
+    if(p>1){ fx.splice(i,1); continue; }
+    const a=1-p;
+    g.save();
+    if(f.type==='flash'){
+      g.globalAlpha=Math.max(0.1,a)*0.9;
+      g.strokeStyle=f.c; g.lineWidth=2.5; g.shadowColor=f.c; g.shadowBlur=18*a;
+      g.beginPath(); g.arc(f.x,f.y,f.r*(0.5+0.5*a),0,6.28); g.stroke();
+      if(f.txt){ g.fillStyle=f.c; g.font='bold 11px "Microsoft YaHei"'; g.textAlign='center'; g.textBaseline='middle'; g.fillText(f.txt,f.x,f.y-f.r-8); }
+    } else if(f.type==='line'){
+      const mx=f.x1+(f.x2-f.x1)*p, my=f.y1+(f.y2-f.y1)*p;
+      g.globalAlpha=a*0.22; g.strokeStyle=f.c; g.lineWidth=1.4;
+      g.beginPath(); g.moveTo(f.x1,f.y1); g.lineTo(f.x2,f.y2); g.stroke();
+      g.globalAlpha=Math.min(1,a*1.4);
+      g.fillStyle=f.c; g.shadowColor=f.c; g.shadowBlur=12;
+      g.beginPath(); g.arc(mx,my,3.5,0,6.28); g.fill();
+    }
+    g.restore();
+  }
+}
+function triggerFx(cx,cy,scale){
+  // 每轮裁决：四柱依次光闪（艮金→巽青→兑橙→震红），处决/挂起追加
+  const v = online&&stateInfo ? stateInfo.verdict : MODEL.verdict;
+  if(v&&v.round&&v.round!==lastVdRound){
+    lastVdRound=v.round;
+    const t0=performance.now(), pos=i=>posOf(renderNodes[i],cx,cy,scale);
+    const P=[[3,'#ffd76a'],[1,'#3affd9'],[7,'#ffab5e'],[5,'#ff5a5a']];
+    P.forEach(([i,c],k)=>fx.push({type:'flash',x:pos(i)[0],y:pos(i)[1],r:22*zoom,c,t0:t0+k*350,dur:600}));
+    if(v.broken&&v.broken.length){
+      const ci=v.chainInfo||{};
+      for(const b of v.broken){ const p=pos(b); const rs=(v.brokenReasons||{}); const rtxt=rs[b]?`·${rs[b]}`:'';
+        fx.push({type:'flash',x:p[0],y:p[1],r:30*zoom,c:'#ff3d5a',t0:t0+4*350,dur:700,txt:`降维${rtxt}`});
+        if(ci[b]&&ci[b].length){ for(const cc of ci[b]){ const q=pos(cc); fx.push({type:'line',x1:p[0],y1:p[1],x2:q[0],y2:q[1],c:'#ff5a5a',t0:t0+4*350,dur:900}); } }
+      }
+    }
+    if(v.pending&&v.pending.length){
+      const p=pos(3); fx.push({type:'flash',x:p[0],y:p[1],r:30*zoom,c:'#9fc0e8',t0:t0+4*350,dur:700,txt:`挂起${v.pending.length}`});
+    }
+  }
+  // 艮→坎调阅脉冲：坎位批准调阅时，艮柱光点流向坎位
+  const cvArr=online&&stateInfo ? (stateInfo.caseView||[]) : MODEL.caseViewLog.slice(-3);
+  if(cvArr.length){
+    const last=cvArr[cvArr.length-1];
+    if(last&&last.ts&&last.ts!==lastViewTs){
+      lastViewTs=last.ts;
+      const a=posOf(renderNodes[3],cx,cy,scale), b=posOf(renderNodes[2],cx,cy,scale);
+      fx.push({type:'line',x1:a[0],y1:a[1],x2:b[0],y2:b[1],c:'#8ad8ff',t0:performance.now(),dur:800});
+    }
+  }
+}
+
+// ---------- 四象情绪钮（固定屏幕四边，点按多选叠加 → 相互共担混合） ----------
+function drawEmotions(){
+  const w=64,h=30, edge=18;
+  const cx=innerWidth/2, cy=innerHeight/2;
+  emPos=[];
+  const keys=['shaoyang','taiyang','shaoyin','taiyin'];
+  for(const k of keys){
+    const e=EMOTIONS[k];
+    let nx,ny;
+    if(k==='shaoyang'){ nx=edge, ny=cy; }
+    else if(k==='taiyang'){ nx=cx, ny=innerHeight-edge-h; }
+    else if(k==='shaoyin'){ nx=innerWidth-edge-w, ny=cy; }
+    else { nx=cx, ny=edge; }
+    emPos.push({key:k,x:nx,y:ny,w,h});
+    const grd=g.createLinearGradient(nx,ny,nx,ny+h);
+    grd.addColorStop(0,e.a); grd.addColorStop(1,e.b);
+    const on=(emoMix[k]||0)>0;
+    g.save();
+    if(on){ g.shadowColor=e.a; g.shadowBlur=22; g.lineWidth=2; g.strokeStyle='#fff'; }
+    g.fillStyle=grd; g.beginPath(); g.roundRect(nx,ny,w,h,8); g.fill();
+    if(on){ g.stroke(); }
+    g.fillStyle='#0a0f1c'; g.font='bold 15px "Microsoft YaHei"'; g.textAlign='center'; g.textBaseline='middle';
+    g.fillText((on?Math.round(emoMix[k]*100):'')+' '+e.label,nx+w/2,ny+h/2+1);
+    g.restore();
+  }
+}
+
+// ---------- 善恶切换 ----------
+let elMode = location.search.includes('evil')?'evil':'good';
+function updateMode(){
+  el.state.textContent = elMode==='good'?'善盘 · 正旋':'恶盘 · 倒旋';
+  el.state.className = elMode==='good'?'good':'evil';
+  el.btn.textContent = elMode==='good'?'切换到恶盘':'切换到善盘';
+  el.btn.className = elMode==='good'?'':'evil';
+}
+el.btn.onclick=()=>{ elMode = elMode==='good'?'evil':'good'; updateMode(); };
+updateMode();
+// 线三·四相切层按钮（默认自动跟随四象映射层）
+buildPhaseButtons();
+
+// ---------- 交互：四象切换 / 点击卦位观测注入 ----------
+cv.addEventListener('click',(e)=>{
+  const rect=cv.getBoundingClientRect();
+  const mx=e.clientX-rect.left, my=e.clientY-rect.top;
+  for(const b of emPos){
+    if(mx>=b.x && mx<=b.x+b.w && my>=b.y && my<=b.y+b.h){
+      // 相互共担：点按 toggle 参与混合（至少保留一个情绪）
+      emoMix[b.key]= (emoMix[b.key]||0)>0 ? 0 : 1;
+      emoMixNormalize();
+      applyEmoMix();
+      return;
+    }
+  }
+  let best=null,bd=1e9;
+  for(const h of hitArr){
+    const dx=mx-h.x,dy=my-h.y,d=dx*dx+dy*dy;
+    if(d<bd){bd=d;best=h;}
+  }
+  if(best && bd< (34*zoom)*(34*zoom)){
+    if(best.idx===2){                          // 坎位L0：只开案卷，不注入
+      el.casePanel.style.display=el.casePanel.style.display==='block'?'none':'block';
+      renderCases(); return;
+    }
+    selIdx = selIdx===best.idx ? null : best.idx;   // 懒渲染：点击展开该卦位的连线/权重，再点收起
+    const type = elMode==='good'?'resonance':'repel';
+    MODEL.feed(best.idx, type, 0.5);
+    api('/event',{idx:best.idx,type,strength:0.5});
+  } else {
+    selIdx = null;                                 // 点击空白：收起
+  }
+});
+
+MODEL.load();
+
+// ---------- 实时数据监测面板（右上角） ----------
+el.btnData.onclick=()=>{
+  const on=el.dataPanel.style.display==='block';
+  el.dataPanel.style.display=on?'none':'block';
+  el.btnData.classList.toggle('on',!on);
+  if(!on) updateDataPanel();
+};
+if(location.search.includes('data')){ el.dataPanel.style.display='block'; el.btnData.classList.add('on'); }
+// 坎位案卷：点击坎位L0卦点查阅（只有坎位能开）
+el.caseClose.onclick=()=>{ el.casePanel.style.display='none'; };
+if(location.search.includes('case')){ el.casePanel.style.display='block'; renderCases(); }
+function renderCases(){
+  if(el.casePanel.style.display!=='block') return;
+  const recs = online&&stateInfo ? (stateInfo.caseRecords||[]) : MODEL.caseRecords;
+  const all  = online&&stateInfo ? (stateInfo.caseStats||{}) : MODEL.caseStats();
+  const cv   = online&&stateInfo ? (stateInfo.caseView||[]) : MODEL.caseViewLog.slice(-3);
+  const total= online&&stateInfo ? (stateInfo.caseCount||0) : MODEL.caseRecords.length;
+  let h='<div style="color:#ffd76a;font-weight:bold;margin-bottom:6px;">⚖ 坎位档案室（仅坎可查阅 · 不参与权重 · 不可磨灭）</div>';
+  const archived=recs.filter(r=>r.archived).length;
+  h+=`<div style="color:#9fc0e8;font-size:11px;">总案卷 ${total} ｜ 未归档 ${total-archived} ｜ 已归档 ${archived}</div>`;
+  // 前科榜：案卷数 → 危险分级（惯犯≥2 直判、重犯1 观察减半）
+  const keys=Object.keys(all).sort((a,b)=>all[b]-all[a]).slice(0,8);
+  if(keys.length){
+    h+='<div style="color:#aac8ff;font-weight:bold;margin-top:8px;">前科榜（案卷数 → 危险分级）</div>';
+    for(const k of keys){ const n=all[k], tag=TAGS[k%8]+'L'+(k>>3);
+      const lv=n>=2?'惯犯':(n===1?'重犯':'初犯');
+      const col=n>=2?'#ff5a5a':(n===1?'#ffd04d':'#9fc0e8');
+      h+=`<span style="display:inline-block;margin:2px 6px 2px 0;padding:2px 7px;border-radius:5px;background:rgba(150,180,255,.08);border:1px solid ${col}55;color:${col};">${tag} ×${n} ${lv}</span>`;
+    }
+  }
+  // 调阅日志：艮请求 → 坎批准
+  if(cv.length){
+    h+='<div style="color:#aac8ff;font-weight:bold;margin-top:8px;">调阅日志（艮请求 → 坎批准）</div>';
+    h+=cv.slice().reverse().map(v=>`<div style="color:#8ad8ff;font-size:11px;">${new Date(v.ts*1000).toLocaleTimeString()} ｜ 艮查 ${TAGS[v.idx%8]}L${v.idx>>3}：前科${v.n} · ${v.mode}</div>`).join('');
+  }
+  if(!recs.length){ h+='<div style="color:#42526e;margin-top:6px;">暂无案卷 —— 震尚未降维封存任何恶爻</div>'; el.caseBody.innerHTML=h; return; }
+  h+='<div style="color:#aac8ff;font-weight:bold;margin-top:8px;">案卷时间线（最近30条 · 100天留存）</div>';
+  for(const r of recs.slice().reverse()){
+    const dl=new Date(r.expire*1000);
+    h+=`<div style="border-bottom:1px solid rgba(90,160,255,.12);padding:7px 0;${r.archived?'opacity:.45;':''}">
+      <div style="color:${r.archived?'#42526e':'#e8f2ff'};line-height:1.7;">${r.text}</div>
+      ${r.llm_note?`<div style="color:#8ad8ff;font-size:11px;line-height:1.6;margin-top:3px;">⚡ LLM注：${r.llm_note}</div>`:''}
+      <div style="color:#5a7aa0;font-size:10px;">立档 ${new Date(r.ts*1000).toLocaleString()} ｜ 保留至 ${dl.toLocaleDateString()} ${r.archived?'· 已归档（不可磨灭，仅作史证）':''}</div>
+    </div>`;
+  }
+  el.caseBody.innerHTML=h;
+}
+// 坎位档案标记（L0 坎卦点）：蓝色脉冲环 + 案卷计数
+function drawCaseMark(cx,cy,scale){
+  const cnt = online&&stateInfo ? (stateInfo.caseCount||0) : MODEL.caseRecords.length;
+  if(cnt<=0) return;
+  const p=posOf(renderNodes[2],cx,cy,scale);
+  const pulse=0.6+0.4*Math.sin(performance.now()/480);
+  g.save();
+  g.beginPath(); g.arc(p[0],p[1],11+pulse*4,0,6.28);
+  g.strokeStyle=rgba('#3aa0ff',0.5*pulse); g.lineWidth=1.2; g.stroke();
+  g.beginPath(); g.arc(p[0],p[1],5,0,6.28); g.fillStyle=rgba('#3aa0ff',0.85); g.fill();
+  g.font='bold 9px "Microsoft YaHei"'; g.textAlign='center'; g.textBaseline='middle';
+  g.fillStyle='#05070d'; g.fillText(String(cnt),p[0],p[1]+0.5);
+  g.fillStyle=rgba('#3aa0ff',0.92); g.font='10px "Microsoft YaHei"';
+  g.fillText('案卷',p[0],p[1]-19);
+  g.restore();
+}
+function updateDataPanel(){
+  if(el.dataPanel.style.display!=='block') return;
+  const s=online&&stateInfo ? stateInfo : MODEL;
+  const mm=online&&stateInfo ? (stateInfo.memoryMap||{}) : {};
+  const v=s.verdict||{}, em=EMOTIONS[s.emotion]||{label:s.emotion||'少阳',phase:'',reso:0,drive:0,litThr:0,fold:0};
+  const ep=online&&stateInfo ? (s.emotionParams||{}) : MODEL.emoSynth();
+  const reso=online&&stateInfo ? s.reso : s.reso;
+  const lit=online&&stateInfo ? s.litCount : MODEL.litCount();
+  const total=online&&stateInfo ? s.total : 96;
+  let h=`<div style="color:#ffd76a;font-weight:bold;">⚡ 实时逻辑数据 · ${new Date().toLocaleTimeString()}${online?'':' (本地降级)'}</div>`;
+  h+=`<div>运行：${elMode==='good'?'善盘·正旋':'恶盘·倒旋'} ｜ ${em.label}${online&&s.emotionWeights?`<span style="color:#9fc0e8;">（${Object.entries(s.emotionWeights).filter(x=>x[1]>0).map(x=>`${EMOTIONS[x[0]].label}${Math.round(x[1]*100)}%`).join('+')}）</span>`:''} ｜ 共振场 ${(reso*100)|0}% ｜ 点亮 ${lit}/${total}</div>`;
+  h+=`<div style="color:#9fc0e8;">四象参数：reso=${ep.reso.toFixed(2)} drive=${ep.drive} litThr=${ep.litThr} fold=${ep.fold}</div>`;
+  h+=`<div style="color:#ffd76a;">裁决#${v.round||0} 艮判${((v.active||0)*100)|0}% 巽查${((v.xun||0)*100)|0}% 兑归${((v.dui||0)*100)|0}% 震降${((v.zhen||0)*100)|0}%</div>`;
+  if(v.llmNote) h+=`<div style="color:#8ad8ff;margin-top:3px;">⚡ 艮判（LLM）：${v.llmNote}</div>`;
+  const brk=v.broken||[], brs=v.brokenReasons||{}, ci=v.chainInfo||{};
+  const chainTxt=Object.values(ci).length?` 连锁${Object.values(ci).reduce((a,l)=>a+l.length,0)}卦`:'';
+  h+=`<div style="color:#9fc0e8;">缓降${(v.guarded||[]).length} 断果${brk.length}${brk.length?`(${brk.map(b=>`${TAGS[b%8]}L${b>>3}·${brs[b]||'?'}`).join('、')})`:''}${chainTxt} 留存${(v.saved||[]).length} 沉没${(v.sunk||[]).length} 挂起${(v.pending||[]).length}</div>`;
+  const wb=online&&stateInfo ? (s.writeback||{}) : {};
+  if(wb.changed&&wb.changed.length) h+=`<div style="color:#8affb0;">↺ 已写回记忆网 ${wb.changed.length} 条 @ ${new Date((wb.t||0)*1000).toLocaleTimeString()}</div>`;
+  else if(wb.err) h+=`<div style="color:#ff8a8a;">✗ 写回失败：${wb.err}</div>`;
+  const crecs=online&&stateInfo ? (s.caseRecords||[]) : MODEL.caseRecords;
+  h+=`<div style="color:#7ec8ff;">坎位案卷 ${crecs.length} 条${crecs.length?` ｜ 最近：${crecs[crecs.length-1].text}`:''}</div>`;
+  const ai=online&&stateInfo ? (stateInfo.ai||{}) : {};
+  if(ai.count) h+=`<div style="color:#8ad8ff;">AI 性格：${ai.tend}（近${ai.count}句 善${ai.toneCounts['善']||0}/恶${ai.toneCounts['恶']||0}/中${ai.toneCounts['中']||0}，倾向分${ai.score}）</div>`;
+  const bal=online&&stateInfo ? (stateInfo.balance||{}) : {};
+  if(bal.ratio!=null) h+=`<div style="color:#d8d0ff;">乾势 ${bal.qian} ｜ 坤容 γ=${bal.gamma} ｜ 天平 ${bal.balance>=0?'+':''}${bal.balance}（善比${bal.ratio}）</div>`;
+  const sea=online&&stateInfo ? (stateInfo.sea||{}) : {};
+  if(sea.total) h+=`<div style="color:#ff8a8a;">弦海（断爻）：${sea.total}断 ｜ 联动续命${sea.linked} ｜ 待清${sea.soon} ｜ 最近断剩${sea.days_left}天</div>`;
+  // 线三·五行情绪行（后台识别 → 落宫卦位分层亮灯；相互共担，多情绪并存）
+  const e5=online&&stateInfo ? (stateInfo.emo5||{}) : MODEL.emo5W;
+  const e5s=Object.entries(e5).filter(x=>x[1]>0.01);
+  if(e5s.length){
+    const ph=PHASES[currentLayer()];
+    h+=`<div style="color:#d0ffc0;">五行情绪：${e5s.map(x=>`<span style="color:${EMO5_COLOR[x[0]]}">${x[0]} ${Number(x[1]).toFixed(2)}</span>`).join(' ｜ ')} ｜ 相层：${ph.season}·${ph.xiang}${ph.yi}${curLayer===-1?'（自动）':''}</div>`;
+  }
+  if(online&&stateInfo&&stateInfo.dialogCount) h+=`<div style="color:#5a7aa0;">数据集样本 ${stateInfo.dialogCount} 条（双架构对照，JSONL 持久化）</div>`;
+  const wk=online&&stateInfo ? (stateInfo.weakMap||{}) : MODEL.weakRemain();
+  const wkKeys=Object.keys(wk);
+  if(wkKeys.length) h+=`<div style="color:#a48cff;">震后遗症(虚弱期)：${wkKeys.map(k=>`${TAGS[k%8]}L${k>>3} ${wk[k]}s`).join('、')}</div>`;
+  const wn=online&&stateInfo ? (stateInfo.warnMap||{}) : MODEL.warnRemain();
+  const wnKeys=Object.keys(wn);
+  if(wnKeys.length) h+=`<div style="color:#ffd04d;">[震卦警告] 观察中：${wnKeys.map(k=>`${TAGS[k%8]}L${k>>3} ${wn[k]}s`).join('、')}</div>`;
+  const cv=online&&stateInfo ? (stateInfo.caseView||[]) : MODEL.caseViewLog.slice(-3).reverse();
+  if(cv.length) h+=`<div style="color:#8ad8ff;">坎位调阅：${cv.map(v=>`${TAGS[v.idx%8]}L${v.idx>>3} 前科${v.n} ${v.mode}`).join('；')}</div>`;
+  h+=`<div style="margin-top:6px;color:#aac8ff;font-weight:bold;">集簇群权重（16群 · 弱端判定 · 权重降序）</div>`;
+  const groups=[]; const t0=0.6, t1=0.3;
+  for(const grp of GROUPS){
+    const wa=mm[grp[0]]?mm[grp[0]].score:(online&&stateInfo?0.5:MODEL.guaLit(grp[0]));
+    const wb=mm[grp[1]]?mm[grp[1]].score:(online&&stateInfo?0.5:MODEL.guaLit(grp[1]));
+    groups.push({g:grp,wg:Math.min(wa,wb)});
+  }
+  groups.sort((a,b)=>b.wg-a.wg);
+  h+='<table>'; h+='<tr><td style="color:#7aa0c0;">卦象</td><td style="color:#7aa0c0;">记忆</td><td style="color:#7aa0c0;text-align:right;">权重</td></tr>';
+  for(const x of groups){
+    const aName=mm[x.g[0]]?mm[x.g[0]].name.slice(0,6):'—', bName=mm[x.g[1]]?mm[x.g[1]].name.slice(0,6):'—';
+    const col=x.wg>=t0?'#ffd76a':(x.wg<t1?'#ff8a8a':'#9fc0e8');
+    const tag=x.wg>=t0?'缓降':(x.wg<t1?'低权':'中');
+    const pname=PURE_NAMES[TAGS[x.g[0]%8]]+(x.g[0]<16?'·内':'·外');
+    h+=`<tr><td style="color:${col};">${pname}</td><td style="color:#7aa0c0;">${aName}/${bName}</td><td style="text-align:right;color:${col};">${x.wg.toFixed(2)} ${tag}</td></tr>`;
+  }
+  h+='</table>';
+  h+=`<div style="margin-top:6px;color:#aac8ff;font-weight:bold;">卦位映射（hash记忆网 → 32卦位）</div>`;
+  h+='<table>';
+  for(let idx=0;idx<32;idx++){
+    const nd=renderNodes[idx];
+    const litAvg=nd.yis.reduce((a,y)=>a+y.litLevel,0)/3;
+    const m=mm[idx];
+    const nm=m?`${m.name.slice(0,10)} t${m.tier} ${m.score.toFixed(2)}`:'—';
+    h+=`<tr><td style="color:#7aa0c0;">${idx} ${TAGS[idx%8]} L${idx>>3}</td><td style="color:${litAvg>0.5?'#3affd9':'#42526e'};">${litAvg>0.5?'●':'○'}</td><td style="color:#9fc0e8;">${nm}</td></tr>`;
+  }
+  h+='</table>';
+  el.dataBody.innerHTML=h;
+}
+
+// ---------- 实时趋势（mini chart：点亮率/共振场/案卷数） ----------
+function sampleTrend(){
+  const s=online&&stateInfo ? stateInfo : MODEL;
+  const total=online&&stateInfo ? (s.total||96) : 96;
+  const lit=(online&&stateInfo ? s.litCount : MODEL.litCount())/total*100;
+  const reso=(s.reso||0)*100;
+  const cases=online&&stateInfo ? s.caseCount : MODEL.caseRecords.length;
+  trendHist.push({lit,reso,cases});
+  if(trendHist.length>180) trendHist.shift();
+  drawTrend();
+}
+function drawTrend(){
+  const cv=document.getElementById('trendCv'); if(!cv) return;
+  const g=cv.getContext('2d'), W=cv.width, H=cv.height;
+  g.clearRect(0,0,W,H);
+  if(trendHist.length<2) return;
+  // 网格
+  g.strokeStyle='rgba(150,180,255,.10)'; g.lineWidth=1;
+  for(let i=1;i<4;i++){ g.beginPath(); g.moveTo(0,H*i/4); g.lineTo(W,H*i/4); g.stroke(); }
+  const maxC=Math.max(10,...trendHist.map(p=>p.cases));
+  const series=[
+    {key:'lit',  col:'#3affd9', label:'点亮%'},
+    {key:'reso', col:'#ffb84d', label:'共振%'},
+    {key:'cases',col:'#7ec8ff', label:'案卷'}
+  ];
+  g.font='9px "Microsoft YaHei"';
+  series.forEach((s,i)=>{
+    g.strokeStyle=s.col; g.lineWidth=1.5; g.beginPath();
+    for(let j=0;j<trendHist.length;j++){
+      const p=trendHist[j];
+      const x=trendHist.length===1?2:(j/(trendHist.length-1)*(W-4)+2);
+      const y=H-4-(s.key==='cases'?(p.cases/maxC):(Math.min(100,p[s.key])/100))*(H-18);
+      if(j===0) g.moveTo(x,y); else g.lineTo(x,y);
+    }
+    g.stroke();
+    const lp=trendHist[trendHist.length-1];
+    g.fillStyle=s.col;
+    g.fillText(`${s.label} ${s.key==='cases'?lp.cases:(lp[s.key]|0)}`, 6+i*96, 10);
+  });
+}
+
+// ---------- 实时调参（滑块即改：四象动力学 + 裁决阈值） ----------
+let lastParamSend=0;
+function sendParam(kv){
+  if(online){ fetch('/params',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(kv)}).catch(()=>{}); }
+  else MODEL.applyLocalParams(kv);
+}
+function buildParams(){
+  const box=document.getElementById('paramBox'); if(!box) return;
+  const spec={reso:[0,1,0.01],drive:[0,3,0.05],litThr:[0,1,0.01],fold:[0,3,0.05]};
+  let h='<div style="color:#ffd76a;font-weight:bold;margin-top:2px;">⚙ 实时调参（滑块即改）</div>';
+  for(const key of Object.keys(EMOTIONS)){
+    const e=EMOTIONS[key];
+    h+=`<div style="color:#9fc0e8;margin-top:3px;">${e.label}(${e.phase})</div><div style="white-space:nowrap;">`;
+    for(const k of Object.keys(spec)){
+      const [mn,mx,st]=spec[k];
+      h+=`<span style="display:inline-block;margin-right:5px;font-size:10px;">${k}<input id="p_${key}_${k}" type="range" min="${mn}" max="${mx}" step="${st}" value="${e[k]}" style="width:46px;vertical-align:middle;"><span id="pv_${key}_${k}" style="color:#7ec8ff;width:22px;display:inline-block;font-size:10px;">${e[k]}</span></span>`;
+    }
+    h+='</div>';
+  }
+  const gspec={high:[0.2,0.95,0.01,'高权'],low:[0.05,0.8,0.01,'低权'],warn:[10,300,5,'警告s'],rebound:[0.5,1,0.01,'反弹']};
+  const pars=online&&stateInfo ? {high:0.6,low:0.3,warn:60,rebound:0.8} : MODEL.pars;
+  h+='<div style="color:#9fc0e8;margin-top:5px;">裁决阈值</div><div style="white-space:nowrap;">';
+  for(const k of Object.keys(gspec)){
+    const [mn,mx,st,lb]=gspec[k];
+    h+=`<span style="display:inline-block;margin-right:5px;font-size:10px;">${lb}<input id="p_g_${k}" type="range" min="${mn}" max="${mx}" step="${st}" value="${pars[k]}" style="width:46px;vertical-align:middle;"><span id="pv_g_${k}" style="color:#7ec8ff;width:22px;display:inline-block;font-size:10px;">${pars[k]}</span></span>`;
+  }
+  h+='</div><div style="margin-top:4px;"><button id="paramReset" style="font-size:10px;padding:2px 8px;background:rgba(150,180,255,.15);color:#9fc0e8;border:1px solid rgba(150,180,255,.3);border-radius:4px;cursor:pointer;">恢复默认</button></div>';
+  box.innerHTML=h;
+  for(const key of Object.keys(EMOTIONS)){
+    for(const k of Object.keys(spec)){
+      const sl=document.getElementById(`p_${key}_${k}`);
+      sl.addEventListener('input',()=>{
+        document.getElementById(`pv_${key}_${k}`).textContent=sl.value;
+        sendParam({key,[k]:parseFloat(sl.value)});
+      });
+    }
+  }
+  const GKEY={high:'high_w',low:'low_w',warn:'warn_s',rebound:'rebound'};
+  for(const k of Object.keys(gspec)){
+    const sl=document.getElementById(`p_g_${k}`);
+    sl.addEventListener('input',()=>{
+      document.getElementById(`pv_g_${k}`).textContent=sl.value;
+      sendParam({[GKEY[k]]:parseFloat(sl.value)});
+    });
+  }
+  document.getElementById('paramReset').addEventListener('click',()=>{
+    const dflt={shaoyang:{reso:0.55,drive:0.5,litThr:0.50,fold:1.0},
+                taiyang:{reso:0.95,drive:1.4,litThr:0.32,fold:1.7},
+                shaoyin:{reso:0.45,drive:0.5,litThr:0.50,fold:1.0},
+                taiyin:{reso:0.12,drive:0.28,litThr:0.72,fold:0.6}};
+    for(const k in dflt) sendParam({key:k,...dflt[k]});
+    sendParam({high_w:0.6,low_w:0.3,warn_s:60,rebound:0.8});
+    buildParams();
+  });
+}
+
+// ---------- 常量 ----------
+const TAGS=['乾','巽','坎','艮','坤','震','离','兑'];
+const R_TAIJI=0.18;
+const YI_LEN=[0.12,0.20,0.28,0.36];
+const STEP=45, DIR=[1,-1,1,-1];
+const layerAngle=[0,0,0,0];
+let lastTick=0; const TICK_MS=2000;
+let lastLocalVd=0;
+
+let rotT=0, last=0, lastRender=0;   // lastRender: 渲染节流基准（FPS 锁 30）
+function frame(ts){
+  requestAnimationFrame(frame);
+  const dt=Math.min((ts-last)/1000,0.05)||0.016; last=ts;
+
+  // —— 数据逻辑（每帧执行：后台 tick 计算保留，不受渲染帧率限制）——
+  // 本地模式（后端离线）才本地演化；在线模式由后端驱动
+  if(!online){ MODEL.tick(dt); renderNodes=MODEL.nodes; }
+  if(!online && ts-lastLocalVd>=8000){ lastLocalVd=ts; MODEL.verdictTick(); MODEL.save(); }
+
+  if(ts-lastTick>=TICK_MS){ lastTick=ts; for(let l=0;l<4;l++) layerAngle[l]=(layerAngle[l]+STEP*DIR[l]+360)%360; }
+
+  // —— 闭环保命锁：视觉渲染帧率锁 30fps（保留机械卡顿感，不追 60 帧丝滑）——
+  if(ts-lastRender<1000/30) return;
+  lastRender=ts;
+
+  const cx=innerWidth/2, cy=innerHeight/2;
+  const scale=Math.min(innerWidth,innerHeight)*0.42*zoom;
+
+  drawBg();
+  weakSec = online&&stateInfo ? (stateInfo.weakMap||{}) : MODEL.weakRemain();
+  warnSec = online&&stateInfo ? (stateInfo.warnMap||{}) : MODEL.warnRemain();
+  if(el.xian.checked) drawXian(cx,cy,scale);
+  drawVerdict(cx,cy,scale);
+  drawTaiji(cx,cy,R_TAIJI*scale, rotT += (elMode==='good'?1:-1)*0.08*(el.speed.value/100)*dt);
+  hitArr=[];
+  // 线三·四相常态单层：只渲染当前相层爻点（8卦位×3爻=24爻，省 3/4 算力）
+  const vL=currentLayer();
+  const viewNodes=renderNodes.map((nd,i)=>({nd,idx:i})).filter(o=>o.nd.layer===vL);
+  let litL=0;
+  for(const o of viewNodes) for(const yi of o.nd.yis) if(Math.max(yi.litLevel,yi.emoLit||0)>0.5) litL++;
+  if(el.yi.checked){ viewNodes.forEach(o=>drawGua(o.nd,o.idx,cx,cy,scale)); }
+  drawCaseMark(cx,cy,scale);
+  drawBrkFx(cx,cy,scale);
+  drawFx(cx,cy,scale);
+  triggerFx(cx,cy,scale);
+  if(el.tag.checked) drawTags(cx,cy,scale);
+  drawEmotions();
+
+  // 数据读数显示（优先后端；混合情绪 label 直接展示）
+  const eml = online&&stateInfo ? (stateInfo.emotion||'少阳') : MODEL.emotion;
+  const em = online&&stateInfo ? EMOTIONS[stateInfo.emotion] : EMOTIONS[MODEL.emotion];
+  const reso = online&&stateInfo ? stateInfo.reso : MODEL.reso;
+  const lit  = online&&stateInfo ? stateInfo.litCount : MODEL.litCount();
+  const v = online&&stateInfo ? stateInfo.verdict : null;
+  let vtxt='';
+  if(v) vtxt=` ｜ 裁决#${v.round} 艮显化${(v.active*100)|0}% 缓降${(v.guarded||[]).length} 断果${(v.broken||[]).length} 留存${(v.saved||[]).length} 沉没${(v.sunk||[]).length}`;
+  el.stat.textContent = `${eml} · 共振场 ${(reso*100)|0}% · 点亮 ${litL}/${viewNodes.length*3}${vtxt}`;
+  // 实时趋势：面板开着时每秒采样；canvas 显示随面板
+  const cvEl=document.getElementById('trendCv');
+  const panelOn=el.dataPanel.style.display==='block';
+  if(cvEl) cvEl.style.display=panelOn?'block':'none';
+  if(panelOn){
+    if(ts-lastTrendS>=1000){ lastTrendS=ts; sampleTrend(); }
+    else drawTrend();
+  }
+  updateDataPanel();
+}
+requestAnimationFrame(frame);
+buildParams();
+// 懒渲染验证/直达：?sel=N 模拟点击卦位展开连线与权重
+if(location.search.includes('sel=')){ const m=location.search.match(/sel=(\d+)/); if(m) selIdx=parseInt(m[1],10)%32; }
+// headless 验证用：?trend=1 时预采样60点，让趋势图立即画出（真实浏览器自然累积）
+if(location.search.includes('trend')){ try{ for(let i=0;i<60;i++) sampleTrend(); }catch(e){} }
+</script>
+<!-- ===== 对话窗口：与盘面 LLM 交互 ===== -->
+<div id="chatFab" title="与盘面对话">⚡</div>
+<div id="chatPanel">
+  <div id="chatHead">与盘面对话 <span style="opacity:.55;font-size:10px;">判官LLM · 实时盘面</span><span id="chatClose">×</span></div>
+  <div id="chatBody"></div>
+  <div id="chatFoot">
+    <input id="chatIn" placeholder="问盘面：当前局势？巽L1为什么被封？" autocomplete="off">
+    <button id="chatSend">发送</button>
+  </div>
+</div>
+<style>
+#chatFab{position:fixed;right:16px;bottom:16px;width:46px;height:46px;border-radius:23px;cursor:pointer;z-index:99;
+  background:linear-gradient(135deg,#0f2a1f,#0b3b2e);border:1px solid rgba(58,255,217,.45);color:#3affd9;
+  font-size:20px;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 18px rgba(0,0,0,.6);user-select:none;}
+#chatFab:hover{box-shadow:0 4px 24px rgba(58,255,217,.35);}
+#chatPanel{position:fixed;right:16px;bottom:72px;width:330px;height:420px;z-index:99;display:none;flex-direction:column;
+  background:rgba(8,14,26,.96);border:1px solid rgba(90,160,255,.35);border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,.7);
+  font-family:inherit;}
+#chatHead{padding:9px 12px;border-bottom:1px solid rgba(90,160,255,.25);color:#e8f2ff;font-size:13px;font-weight:bold;
+  display:flex;justify-content:space-between;align-items:center;background:rgba(20,34,58,.5);border-radius:10px 10px 0 0;}
+#chatClose{cursor:pointer;color:#5a7aa0;font-size:16px;padding:0 4px;}
+#chatClose:hover{color:#ff8a8a;}
+#chatBody{flex:1;overflow-y:auto;padding:10px 12px;font-size:12px;line-height:1.7;}
+#chatBody .u{color:#7ec8ff;margin-bottom:8px;white-space:pre-wrap;}
+#chatBody .a{color:#b7ffd9;background:rgba(43,216,142,.08);border-left:2px solid #2bd88e;padding:6px 9px;margin-bottom:8px;border-radius:0 6px 6px 0;white-space:pre-wrap;}
+#chatBody .sys{color:#5a7aa0;font-style:italic;}
+#chatFoot{display:flex;gap:6px;padding:8px;border-top:1px solid rgba(90,160,255,.2);}
+#chatIn{flex:1;background:rgba(12,22,40,.9);border:1px solid rgba(90,160,255,.3);border-radius:6px;color:#e8f2ff;padding:7px 10px;font-size:12px;outline:none;}
+#chatIn:focus{border-color:rgba(58,255,217,.6);}
+#chatSend{background:linear-gradient(135deg,#0f2a1f,#0b3b2e);border:1px solid rgba(58,255,217,.4);color:#3affd9;
+  border-radius:6px;padding:0 14px;font-size:12px;cursor:pointer;}
+#chatSend:hover{background:#123f31;}
+</style>
+<script>
+(function(){
+  const fab=document.getElementById('chatFab'), panel=document.getElementById('chatPanel'),
+        body=document.getElementById('chatBody'), inp=document.getElementById('chatIn'),
+        send=document.getElementById('chatSend'), close=document.getElementById('chatClose');
+  const toneColor={善:'#2bd88e',恶:'#ff5a6a',中:'#7c8aa5'};
+  const say=(cls,txt)=>{ const d=document.createElement('div'); d.className=cls; d.textContent=txt; body.appendChild(d); body.scrollTop=body.scrollHeight; };
+  const renderHistory=(h)=>{
+    body.innerHTML='';
+    if(!h.length){ say('sys','正常 DeepSeek 对话已接通（服务端记忆，重开页面自动续上）。随便聊：技术、AI、生活都行。'); return; }
+    h.forEach(r=>{
+      if(r.user) say('u',r.user);
+      if(r.ai){ say('a',r.ai);
+        if(r.tone) say('sys',`盘面判定：${r.tone}（${Math.round((r.conf||0)*100)}%）｜${r.reason||''} ${r.effect||''}`); }
+    });
+    body.scrollTop=body.scrollHeight;
+  };
+  // 页面加载：从服务端恢复持久化历史（跨刷新/重开保持记忆）
+  fetch(API+'/chat_history').then(r=>r.json()).then(d=>renderHistory(d.history||[])).catch(()=>say('sys','（后端未连接）'));
+  fab.onclick=()=>{ panel.style.display=panel.style.display==='flex'?'none':'flex'; };
+  close.onclick=()=>{ panel.style.display='none'; };
+  if(location.search.includes('chat')) panel.style.display='flex';   // ?chat=1 直达展开（headless 验证/直达用）
+  const go=()=>{
+    const msg=inp.value.trim(); if(!msg) return;
+    say('u',msg); inp.value=''; send.disabled=true;
+    fetch(API+'/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({msg})})
+      .then(r=>r.json()).then(d=>{
+        const t=d.reply||'（无回复）'; say('a',t);
+        if(d.tone){ say('sys',`盘面判定：${d.tone.tone}（${Math.round((d.tone.confidence||0)*100)}%）｜${d.tone.reason||''} ${d.effect||''}`); }
+        send.disabled=false; })
+      .catch(e=>{ say('a','（对话服务未连接，先启动后端）'); send.disabled=false; });
+  };
+  send.onclick=go; inp.onkeydown=e=>{ if(e.key==='Enter') go(); };
+})();
+</script>
+</body>
+</html>
