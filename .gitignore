@@ -1,0 +1,25 @@
+# ---- 密钥（切勿提交） ----
+KEY.txt
+start.bat
+.env
+
+# ---- 运行时数据（实验样本 / 记忆网 / 盘面持久化） ----
+*.jsonl
+ai_expr_memory.json
+ai_expr_memory.json.bak
+memory_state.json
+memory_state.json.bak
+taiji_model_state.json
+*.json.bak
+
+# ---- Python ----
+__pycache__/
+*.pyc
+
+# ---- 前端临时 / 截图 / 校验文件 ----
+node_modules/
+package.json
+package-lock.json
+_*.png
+_*.txt
+_inline_check.js
