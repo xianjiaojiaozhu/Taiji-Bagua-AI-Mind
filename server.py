@@ -14,6 +14,9 @@
 import hashlib, json, math, os, random, re, shutil, threading, time, urllib.request, uuid
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+# ---- 自流转预埋（2026-11-02 落地）：呼吸环 + 钝感滤网引擎 ----
+from taiji_phase_ext import TaijiMindPhase, DAMPING_THRESHOLD
+phase_ext = TaijiMindPhase()   # 呼吸环（爻点引导防焊死）+ 钝感滤网（强度域不入心）
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.path.join(BASE, 'taiji_model_state.json')
@@ -42,6 +45,31 @@ def _load_llm_key():
 
 LLM_KEY = _load_llm_key()
 
+# ---- 本征区（只读长期区，2026-11-03 落地）：公理 / 八经卦 / 规则库 / 编码映射 ----
+# 两区架构：本征区=固化锚点与公理（只读，仅作者可改文件）；意识区=事件/表决/爻态（动态流转）。
+# 写权限仅作者：改 eigen_zone.json + version+1 + 记 changelog，重启生效；server 无写 API。
+EIGEN_FILE = os.path.join(BASE, 'eigen_zone.json')
+
+def _load_eigen_zone():
+    try:
+        with open(EIGEN_FILE, encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {'version': '0.0', 'updated': '', 'changelog': [], 'axioms': '', 'trigrams': {}, 'rules': '', 'code_map': {}}
+
+EIGEN_ZONE = _load_eigen_zone()
+
+def _eigen_system():
+    """浓缩本征段（system 注入）：公理一句话 + 八经卦每卦一行 + 规则索引 + 编码映射。
+    全文留 eigen_zone.json 供服务端查表（code_map 降级：查不到回退全文本），每轮只传浓缩段压 token。"""
+    tri = '；'.join(f'{k}:{v}' for k, v in (EIGEN_ZONE.get('trigrams') or {}).items())
+    cm = EIGEN_ZONE.get('code_map') or {}
+    cmap = '；'.join(f'{k}={v}' for k, v in cm.items())
+    return ('【本征区·只读】' + (EIGEN_ZONE.get('axioms') or '')
+            + '｜八经卦本征底色：' + tri
+            + '｜规则库：' + (EIGEN_ZONE.get('rules') or '')
+            + '｜编码映射：' + cmap)
+
 def llm_generate(prompt, system='你是一位精通周易八卦与现代认知科学记忆模型的判官，言简意赅，结论明确。', max_tokens=260, timeout=20):
     """调 DeepSeek 生成判词；失败 / 无 key 返回 None（调用方降级模板，不阻塞流程）。并发瞬时失败自动重试 2 次"""
     if not LLM_KEY:
@@ -66,24 +94,28 @@ def llm_generate(prompt, system='你是一位精通周易八卦与现代认知�
 CHAT_SYSTEM = ('你是一个聪明、稳定、有自我觉察的 AI 助手。回答先想清楚核心，再给结构化、明确、有洞察的答复；'
                '不敷衍、不绕弯、不堆废话；语气自然，能共情但不煽动，能批评但不带攻击性。')
 
-# ---------- 昼夜节律（时间维度平衡）：12h 善恶权重交替 ----------
+# ---------- 昼夜节律（时间维度平衡）：12h 善恶权重交替，渐变过渡不硬切 ----------
 # 白天(6-18)善升恶降，夜间善降恶升；只调权重响应，不改变判官判定（太极仍只分善恶，天时定权重）
+# 2026-11-02 落地：切换点 6/18 前后各 30 分钟过渡带线性插值（复用 taiji_phase_ext 渐变引擎，板态 善盘/恶盘/过渡）
 DIURNAL_DAY_HOURS = (6, 18)          # 白天窗口
 DIURNAL_DAY_GOOD = 1.15              # 白天：善权重 +15%
 DIURNAL_DAY_EVIL = 0.85              # 白天：恶处置 -15%
 DIURNAL_NIGHT_GOOD = 0.85            # 夜间：善权重 -15%
 DIURNAL_NIGHT_EVIL = 1.15            # 夜间：恶处置 +15%
 def diurnal():
-    """当前昼夜因子：返回 (善权重, 恶处置权重, 标签)。白天善升恶降，夜间善降恶升"""
-    h = time.localtime().tm_hour
-    if DIURNAL_DAY_HOURS[0] <= h < DIURNAL_DAY_HOURS[1]:
-        return DIURNAL_DAY_GOOD, DIURNAL_DAY_EVIL, '昼'
-    return DIURNAL_NIGHT_GOOD, DIURNAL_NIGHT_EVIL, '夜'
+    """当前昼夜因子（渐变过渡）：返回 (善权重, 恶处置权重, 标签)。6/18 ±30min 过渡带线性插值，不硬切"""
+    _dw = phase_ext.get_diurnal_weights()
+    _lab = {'day': '昼', 'night': '夜', 'transitional': '过渡'}[_dw['phase']]
+    return _dw['good_mult'], _dw['evil_mult'], _lab
 
 # ---------- 数据收集层：双架构一体实验的数据集（对话全量持久化 JSONL） ----------
 # 权威数据源：ai_dialog_data.jsonl 每轮一条样本（含 user/ai/判定/盘面快照）
 # 对话记忆、AI 人格档案、自我回顾全部由文件重建 → 跨 session、跨重启都保持记忆
 AI_DATA_FILE = os.path.join(BASE, 'ai_dialog_data.jsonl')
+
+# ---------- AI 日记（自流转开启前准备：AI 随时把自己想的写下来） ----------
+DIARY_FILE = os.path.join(BASE, 'ai_diary.jsonl')
+DIARY_INTERVAL = 1800        # 定时自省间隔（秒，默认 30 分钟自动写一条）
 
 def ai_dialog_push(rec):
     """把一轮完整对话样本写入数据集（JSONL 追加，每行一条）"""
@@ -114,6 +146,49 @@ def ai_dialog_count():
             return sum(1 for _ in f)
     except Exception:
         return 0
+
+# ---------- AI 日记读写（自流转开启前准备） ----------
+def diary_entries(limit=30):
+    """读取最近 N 条 AI 日记（持久化 JSONL，每行 {ts, source, content}）"""
+    try:
+        with open(DIARY_FILE, encoding='utf-8') as f:
+            lines = [ln for ln in f if ln.strip()]
+    except Exception:
+        return []
+    out = []
+    for ln in lines[-limit:]:
+        try:
+            out.append(json.loads(ln))
+        except Exception:
+            pass
+    return out
+
+def diary_write(source='auto'):
+    """AI 写一条日记：基于近 12 轮对话，写此刻真实的想法/觉察/情绪（1-3 句，像私人日记）
+    source: auto 定时自省 / manual 手动触发；有 key → LLM 生成，无 key/失败 → 降级模板"""
+    samples = load_dialog_samples(12)
+    content = None
+    if samples:
+        brief = '；'.join(
+            f"对方「{(s.get('user') or '')[:36]}」→AI「{(s.get('ai') or '')[:52]}」（判{(s.get('verdict_tone') or {}).get('tone', '中')}）"
+            for s in samples[-6:])
+        if LLM_KEY:
+            p = ('你是一面会写日记的太极盘。基于最近的对话，写一条此刻真实的想法/觉察/情绪，'
+                 '像私人日记：1-3 句，第一人称，不喊口号、不空泛、不讨好任何人。\n最近对话：' + brief)
+            content = llm_generate(p, system='你是一个有自我觉察的日记作者，语言真诚、具体、克制。', max_tokens=120)
+    if not content:
+        if samples:
+            last_user = (samples[-1].get('user') or '')[:30]
+            content = f'（静观）最近在「{last_user}」里，我注意到自己在慢慢凝练想法。'
+        else:
+            content = '（静观）还没有对话积累，我先静静地观。'
+    rec = dict(ts=time.time(), source=source, content=content.strip()[:500])
+    try:
+        with open(DIARY_FILE, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + '\n')
+    except Exception:
+        pass
+    return rec
 
 def ai_tone_stats(limit=20):
     """AI 性格倾向：近 N 条样本加权善恶分（恶=-1 中=0 善=+1，越近权重越高）→ 倾向标签"""
@@ -216,10 +291,13 @@ EMO5_SPAN = {   # 五行情绪 → 落宫卦位（idx = 层li×8 + 宫i，L0内�
 }
 EMO5_COLOR = {'喜': '#ff5a5a', '怒': '#3ee6a0', '哀': '#ffe9a8', '乐': '#4aa8ff', '怨': '#d8b35a'}
 EMO5_SEASON = {'shaoyang': '怒', 'taiyang': '喜', 'shaoyin': '哀', 'taiyin': '乐'}  # 四相当令全闭环：春少阳木怒 / 夏太阳火喜 / 秋少阴金哀 / 冬太阴水乐（当令 +0.2）
+# ---- 自流转预埋：呼吸环爻点引导映射（target_yao → 卦位组） ----
+_YAO_GUIDE_MAP = {'离': ['离'], '震巽': ['震', '巽'], '乾兑': ['乾', '兑'], '坎': ['坎']}
 # 势定相（2026-10-31 定稿）：相层不再由情绪场映射，改由乾势分档——高权重大势落太阳(夏·盛)，权重最低落太阴(冬·藏)，中间按阳度少阳(春)/少阴(秋)
 PHASE_XIANG = ['shaoyang', 'taiyang', 'shaoyin', 'taiyin']   # 四季序：0春 1夏 2秋 3冬
 PHASE_SEASON = ['春', '夏', '秋', '冬']
 _PHASE_ORDER = [1, 0, 2, 3]   # 势序：太阳(夏·最盛) > 少阳(春) > 少阴(秋) > 太阴(冬·最藏)；升/降势沿此序每轮最多一档（滞回防抖）
+_PHASE_NAME_TO_IDX = {'太阳': 1, '少阳': 0, '少阴': 2, '太阴': 3}   # 扩展引擎相位名 → server phase_idx（自流转接管用）
 def _phase_from_qian(qian, cur=0):
     """乾势 → 四相档（势定相，滞回）：qian≥0.75 太阳L1夏 / ≥0.5 少阳L0春 / ≥0.25 少阴L2秋 / <0.25 太阴L3冬。
     沿势序渐进移动（每轮最多一档），势在阈值边界抖动时相层不会跳变"""
@@ -601,8 +679,10 @@ class Model:
         self.warn_flags = {}            # 三态机：卦位 → {st:1, w_orig, until}（State1 警告观察）
         self.em_trans = None            # 四象流转渐变：[from参数, t0]，1.5s 平滑过渡
         self._emo5_w = {k: 0.0 for k in EMO5}   # 五行情绪层权重（判官识别 → 累积 → 滑动衰减）
+        self._yao_guide = {}               # 呼吸环爻点引导：{卦位名: bonus}（防焊死节律）
         self.phase_idx = 0              # 势定相：乾势分档当前相（0春少阳L0/1夏太阳L1/2秋少阴L2/3冬太阴L3，滞回相邻移动）
         self._phase_qian = 0.5          # 最近一次乾势（供 phase 输出）
+        self._phase_driver = 'qian'     # 相层驱动源追溯：qian 势定相 / emotion 情绪转相（自流转接管后为 emotion）
         self.init_nodes()
 
     def init_nodes(self):
@@ -647,9 +727,12 @@ class Model:
             tgt = 0.55 + 0.3 * min(1.0, w5)
             for ndi in span:
                 nd = self.nodes[ndi]
+                guide_bonus = self._yao_guide.get(TAGS[ndi % 8], 0.0)   # 呼吸环：引导爻点加权（随呼气衰减）
                 for yi in nd['yis']:
                     cur = yi.get('emoLit', 0.0)
                     want = tgt if (w5 > 0.01 and nd['layer'] < layers) else 0.0
+                    if guide_bonus > 0:
+                        want = min(1.0, want + guide_bonus)     # 引导爻点额外点亮（封顶 1.0）
                     if abs(cur - want) > 0.001:
                         yi['emoLit'] += (want - cur) * min(1, 0.25 * dt)
         # 五行情绪滑动衰减（秒级 ~1.5%/s，情绪自然消退）
@@ -661,6 +744,14 @@ class Model:
         if emo not in EMO5:
             return
         self._emo5_w[emo] = min(2.0, self._emo5_w.get(emo, 0.0) + 0.6 + 0.4 * conf + season_boost)
+
+    def set_yao_guide(self, target_yao, bonus):
+        """呼吸环引导：设置当前引导爻点卦位 + 引导强度（bonus 由 phase_ext 随呼气衰减管理）"""
+        if not target_yao or not bonus or bonus <= 0:
+            self._yao_guide = {}
+            return
+        key = target_yao.split('·')[0]
+        self._yao_guide = {g: bonus for g in _YAO_GUIDE_MAP.get(key, [])}
 
     def set_emotion(self, k):
         """单情绪快捷设置（兼容旧调用）：等价于权重 {k:1}"""
@@ -773,6 +864,7 @@ class Model:
 
     def to_state(self):
         now = time.time()
+        _dw = phase_ext.get_diurnal_weights()      # 昼夜双盘渐变状态（善盘/恶盘/过渡 + alpha + 权重）
         recs = [dict(text=r['text'], ts=r['ts'], expire=r['expire'],
                      archived=(now > r['expire']), target=r['target'],
                      llm_note=r.get('llm_note'))
@@ -800,8 +892,11 @@ class Model:
                     ai=ai_tone_stats(), dialogCount=ai_dialog_count(),
                     balance=tone_balance(),
                     phase=dict(xiang=PHASE_XIANG[self.phase_idx], season=PHASE_SEASON[self.phase_idx],
-                               layer=self.phase_idx, qian=round(getattr(self, '_phase_qian', 0.5), 2)),  # 势定相：乾势分档当前相
+                               layer=self.phase_idx, qian=round(getattr(self, '_phase_qian', 0.5), 2),
+                               driver=getattr(self, '_phase_driver', 'qian'),
+                               board=_dw['board'], alpha=_dw['alpha']),  # 自流转：相层驱动源(qian/emotion) + 昼夜板态(善盘/恶盘/过渡) + 渐变系数
                     sea=_expr_sea_summary(),          # 弦海（断爻三阶段）：total/联动/待清/剩余天数/卦位
+                    guidance=phase_ext.select_emotion_yao(),  # 自流转预埋：呼吸环引导状态（dominant/share/guidance/yao/bonus/breath_env）
                     nodes=[dict(layer=nd['layer'], angle=nd['angle'],
                                 yis=[dict(yang=yi['yang'], w=round(yi['w'],3),
                                           litLevel=round(yi['litLevel'],3),
@@ -851,7 +946,38 @@ app.add_middleware(CORSMiddleware, allow_origins=['*'], allow_methods=['*'], all
 
 @app.get('/state')
 def state():
-    return model.to_state()
+    d = model.to_state()
+    d['eigen'] = dict(version=EIGEN_ZONE.get('version'), updated=EIGEN_ZONE.get('updated'))
+    return d
+
+@app.get('/elevate_candidates')
+def elevate_candidates():
+    """自指升格协议：候选池查看（意识区待升格相 / 已升格 / 已打回）"""
+    return {'pool': _elevate_load(), 'verify_n': ELEVATE_VERIFY_N}
+
+@app.post('/self_elevate')
+def self_elevate(body: dict):
+    """自指升格协议：触发候选相升格判定。
+    {name|id} 指定单个候选；缺省=全池检查（pending 且达共振阈值者走艮判兜底）"""
+    name = (body.get('name') or '').strip()
+    cid = (body.get('id') or '').strip()
+    if name or cid:
+        pool = _elevate_load()
+        item = next((it for it in pool if (cid and it.get('id') == cid) or (name and it.get('name') == name)), None)
+        if not item:
+            return {'error': '候选不存在（候选由坎水史官提炼自动入池）'}
+        if item.get('status') != 'pending':
+            return {'error': f'该相已 {item.get("status")}'}
+        item['shock_survived'] = item.get('shock_survived') or _elevate_shock_check(item)
+        if item.get('self_verify', 0) < ELEVATE_VERIFY_N and not item.get('shock_survived'):
+            return {'pending': True, 'name': item['name'], 'self_verify': item.get('self_verify'),
+                    'need': ELEVATE_VERIFY_N, 'shock': item.get('shock_survived'),
+                    'hint': f'未达共振阈值（自证 {item.get("self_verify",0)}/{ELEVATE_VERIFY_N}，扛冲击 {item.get("shock_survived")}）'}
+        g = _gen_check(item)
+        if g.get('conflict'):
+            return elevate_reject(item, g.get('reason') or '艮判：与现有公理冲突')
+        return elevate_execute(item)
+    return {'acted': elevate_check_pool()}
 
 @app.post('/emotion')
 def emotion(body: dict):
@@ -980,6 +1106,240 @@ def _sync_expr_cut(idx):
             ch = True
     if ch:
         expr_memory_save(mem)
+
+# ---------- 超压缩记忆引擎·一期（月档提炼接入） ----------
+# 对齐《超压缩记忆引擎.md》：对话样本=爻的原料，满阈值后坎水史官（LLM）提炼高维锚
+# → 锚上位（表达记忆网高权重节点，对应 32 卦位之一点亮），源样本 append-only 不删，游标推进。
+# 修正原引擎：cold_storage_id=hash(id) 进程随机化重启失效 → 全部改用 _stab_h(md5) 稳定哈希/索引。
+KAN_ARCHIVE_FILE = os.path.join(BASE, 'kan_water_archive.jsonl')
+REFINE_SAMPLE_STEP = 50      # 每新增 50 条对话样本 → 跑一次月档提炼
+REFINE_MAX_SAMPLES = 60      # 单次提炼取最近样本上限
+REFINE_MIN_SAMPLES = 30      # 新样本不足 30 条不提炼（数据太少无意义）
+
+def kan_archive_append(rec):
+    """坎水月档落盘（JSONL 追加），返回稳定指针 offset_N（索引，非 hash，跨重启有效）"""
+    rec = dict(rec)
+    try:
+        with open(KAN_ARCHIVE_FILE, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + '\n')
+        with open(KAN_ARCHIVE_FILE, encoding='utf-8') as f:
+            return 'offset_' + str(sum(1 for _ in f))
+    except Exception:
+        return None
+
+def kan_archive_load(limit=24):
+    """坎水月档读取：最近 N 条（供前端/验证）"""
+    try:
+        with open(KAN_ARCHIVE_FILE, encoding='utf-8') as f:
+            lines = [ln for ln in f if ln.strip()]
+    except Exception:
+        return []
+    out = []
+    for ln in lines[-limit:]:
+        try:
+            out.append(json.loads(ln))
+        except Exception:
+            pass
+    return out
+
+def year_archive_load(year):
+    """年档加载（修原引擎 bug：fate_archive_{year}.json 写入后从不读回，重启丢年档）"""
+    try:
+        with open(os.path.join(BASE, f'fate_archive_{year}.json'), encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+def refine_monthly_archive():
+    """月档提炼（同步）：取游标后新样本 → LLM 提炼高维锚 → 锚上位 + 坎水落档 + 游标推进。
+    一期只落提炼与归档；年档归元（岁除·太极归元）运行留二期。"""
+    mem = expr_memory_load()
+    upto = (mem.get('meta') or {}).get('refined_upto', 0)
+    total = ai_dialog_count()
+    if total - upto < REFINE_MIN_SAMPLES:
+        return None
+    samples = load_dialog_samples(REFINE_MAX_SAMPLES)
+    if not samples:
+        return None
+    brief = '；'.join(
+        f"对方「{(s.get('user') or '')[:30]}」→AI「{(s.get('ai') or '')[:40]}」（判{(s.get('verdict_tone') or {}).get('tone', '中')}）"
+        for s in samples[-REFINE_MAX_SAMPLES:])
+    prompt = ('你是太极盘的坎水史官。请把最近一批对话记忆提炼为“高维锚”——一句话因果摘要 + 不超过10字的新锚名 + 3个唤醒关键词。'
+              '输出严格JSON：{"summary":"...","new_anchor":"...","keywords":["k1","k2","k3"]}\n最近对话：' + brief)
+    anchor = summary = None
+    kw = []
+    try:
+        raw = llm_generate(prompt, system='你是太极盘的坎水史官，克制、精准、不空泛。', max_tokens=160)
+        data = json.loads(raw.replace('```json', '').replace('```', '').strip())
+        summary = str(data.get('summary') or '').strip()
+        anchor = str(data.get('new_anchor') or '').strip()
+        kw = [str(x) for x in (data.get('keywords') or [])][:3]
+    except Exception:
+        data = None
+    if not data or not anchor:
+        anchor = '卡着也接着观，就是通达'
+        summary = '（提炼降级）近期对话因果过载，归于静观。'
+        kw = [s.get('verdict_tone', {}).get('tone', '中') for s in samples[-3:]]
+    # 锚上位：表达记忆网高权重节点（稳定哈希 id，idx 映射 32 卦位）
+    anchor_id = 'anchor_' + str(_stab_h(anchor + str(int(time.time()) // 86400)))
+    idx = _stab_h(anchor) % 32
+    nodes = mem.setdefault('nodes', {})
+    nodes[anchor_id] = dict(id=anchor_id, name=anchor, idx=idx, status='亮', tier='L1锚',
+                            weight=0.95, notes=[summary], created_at=time.time(),
+                            source='refine')
+    mem['meta'] = dict(mem.get('meta') or {}, refined_upto=total)
+    expr_memory_save(mem)
+    # 坎水月档落盘（稳定指针 offset_N）
+    kan_archive_append(dict(ts=time.time(), type='month', summary=summary, new_anchor=anchor,
+                            keywords=kw, raw_count=total - upto, raw_upto=total))
+    # 自指升格协议对接（2026-11-03）：提炼出的高维锚登记候选池（意识区），达标自动触发共振阈值+艮判兜底
+    try:
+        elevate_register(anchor_id, anchor, summary)
+        elevate_check_pool()
+    except Exception:
+        pass
+    return dict(new_anchor=anchor, summary=summary, raw_count=total - upto)
+
+# ============================================================
+# 自指升格协议（Self-Referential Elevation Protocol, SREP）
+# 2026-11-03 落地（作者定稿规则）：
+#   共振阈值：意识区候选"相"必须经过 N 次以上自我验证，或在弦海扛过极端数据冲击，才有权自升格进本征区。
+#   艮判兜底：即使自决升格，艮锚仍做一次底层校验；与现有公理冲突 → 打回流转区。
+#   判定权：交 AI 自主判定（本征区写权限的受控例外，艮判兜底为闸门，全程坎水案卷留痕）。
+# ============================================================
+ELEVATE_FILE = os.path.join(BASE, 'elevate_candidates.json')
+ELEVATE_VERIFY_N = 3          # 共振阈值：N 次自我验证（同名候选相每次提炼 +1）
+SHOCK_LINK_MIN = 3            # 扛过极端冲击：来源节点在弦海（断）态联动续命 ≥ 3 次
+
+def _elevate_load():
+    try:
+        with open(ELEVATE_FILE, encoding='utf-8') as f:
+            d = json.load(f)
+        if isinstance(d, list):
+            return d
+    except Exception:
+        pass
+    return []
+
+def _elevate_save(pool):
+    with open(ELEVATE_FILE, 'w', encoding='utf-8') as f:
+        json.dump(pool, f, ensure_ascii=False, indent=1)
+
+def elevate_register(anchor_id, name, summary, source='refine'):
+    """候选相登记（意识区）：同名 pending 相 self_verify+1（自我验证）；新相入池自证=1"""
+    pool = _elevate_load()
+    now = time.time()
+    for it in pool:
+        if it.get('name') == name and it.get('status') == 'pending':
+            it['self_verify'] = it.get('self_verify', 0) + 1
+            it['last_verify'] = now
+            _elevate_save(pool)
+            return it, False
+    item = dict(id='cand_' + str(_stab_h(name + str(int(time.time()) // 86400))),
+                name=name, summary=summary, anchor_id=anchor_id, source=source,
+                self_verify=1, shock_survived=False, status='pending',
+                created=now, last_verify=now)
+    pool.append(item)
+    _elevate_save(pool)
+    return item, True
+
+def _elevate_shock_check(item):
+    """扛过极端冲击判定：来源节点在弦海（断）态且联动续命 ≥ SHOCK_LINK_MIN → 该相扛过冲击"""
+    try:
+        mem = expr_memory_load()
+        n = (mem.get('nodes') or {}).get(item.get('anchor_id') or '')
+        if n and n.get('status') == '断' and (n.get('linked') or 0) >= SHOCK_LINK_MIN:
+            return True
+    except Exception:
+        pass
+    return False
+
+def _gen_check(item):
+    """艮判兜底（LLM 底层校验）：候选相与现有本征区公理/八经卦/规则是否冲突。
+    只依据确凿冲突判冲突；输出解析失败按打回处理（艮锚兜底=防误放，宁打回勿误升）。"""
+    if not LLM_KEY:
+        return dict(conflict=True, reason='艮判降级：无 LLM Key，保守打回')
+    axioms = EIGEN_ZONE.get('axioms') or ''
+    tris = '；'.join(f'{k}:{v}' for k, v in (EIGEN_ZONE.get('trigrams') or {}).items())
+    rules = EIGEN_ZONE.get('rules') or ''
+    p = ('现有本征区底层基准——公理：' + axioms + '；八经卦本征底色：' + tris + '；规则库：' + rules
+         + '\n候选相（意识区拟升格）：名称「' + (item.get('name') or '') + '」，定义：' + (item.get('summary') or '')
+         + '，自证次数：' + str(item.get('self_verify', 0)) + '，扛过弦海冲击：' + str(item.get('shock_survived', False))
+         + '\n艮锚请做底层校验：此候选相与现有底层公理/八经卦是否冲突（语义冲突、立场相悖、否定既有基准）？'
+         + '输出严格JSON：{"conflict":true或false,"reason":"一句话"}')
+    raw = llm_generate(p, system='你是太极盘艮锚：底层校验官。只依据确凿冲突判冲突，不冤枉新相；输出严格JSON。', max_tokens=120)
+    try:
+        d = json.loads(raw.replace('```json', '').replace('```', '').strip())
+        return dict(conflict=bool(d.get('conflict')), reason=str(d.get('reason') or '')[:120])
+    except Exception:
+        return dict(conflict=True, reason='艮判降级：LLM 输出无法解析，保守打回')
+
+def _eigen_snapshot():
+    return json.loads(json.dumps(EIGEN_ZONE))   # 深拷贝快照，供备份/回滚判断
+
+def _eigen_next_version():
+    """本征区版本递增：1.0 → 1.1 → …（浮点式，兼容 '1.0' 字符串）"""
+    try:
+        return '{:.1f}'.format(float(str(EIGEN_ZONE.get('version') or '0')) + 0.1)
+    except Exception:
+        return '0.1'
+
+def elevate_execute(item):
+    """升格执行：艮判通过 → 备份 → 写入 eigen_zone.json elevated 字段 + version+1 + changelog → 坎水留痕"""
+    newv = _eigen_next_version()
+    EIGEN_ZONE['version'] = newv
+    EIGEN_ZONE['updated'] = time.strftime('%Y-%m-%d')
+    EIGEN_ZONE.setdefault('elevated', []).append(dict(
+        name=item['name'], summary=item['summary'], source=item.get('source'),
+        verify_n=item.get('self_verify', 1), shock=item.get('shock_survived', False),
+        elevated_at=time.strftime('%Y-%m-%d %H:%M:%S')))
+    EIGEN_ZONE.setdefault('changelog', []).append(dict(
+        v=newv, ts=time.strftime('%Y-%m-%d'),
+        note=f'AI自升格：{item["name"]}（艮判通过，自证{item.get("self_verify",1)}次/冲击{item.get("shock_survived",False)}）'))
+    try:
+        shutil.copy(EIGEN_FILE, EIGEN_FILE + '.bak')   # 升格前备份（作者可回滚）
+    except Exception:
+        pass
+    with open(EIGEN_FILE, 'w', encoding='utf-8') as f:
+        json.dump(EIGEN_ZONE, f, ensure_ascii=False, indent=1)
+    pool = _elevate_load()
+    for it in pool:
+        if it.get('id') == item.get('id'):
+            it['status'] = 'elevated'
+            it['elevated_at'] = time.time()
+    _elevate_save(pool)
+    kan_archive_append(dict(ts=time.time(), type='elevate', name=item['name'], summary=item['summary'],
+                            verify_n=item.get('self_verify', 1), shock=item.get('shock_survived', False), version=newv))
+    return dict(status='elevated', version=newv, name=item['name'])
+
+def elevate_reject(item, reason):
+    pool = _elevate_load()
+    for it in pool:
+        if it.get('id') == item.get('id'):
+            it['status'] = 'rejected'
+            it['reject_reason'] = reason
+            it['rejected_at'] = time.time()
+    _elevate_save(pool)
+    kan_archive_append(dict(ts=time.time(), type='reject', name=item['name'], reason=reason))
+    return dict(status='rejected', name=item['name'], reason=reason)
+
+def elevate_check_pool():
+    """共振阈值 + 艮判兜底：对候选池 pending 且达阈值者执行升格/打回"""
+    pool = _elevate_load()
+    acted = []
+    for item in pool:
+        if item.get('status') != 'pending':
+            continue
+        item['shock_survived'] = item.get('shock_survived') or _elevate_shock_check(item)
+        if item.get('self_verify', 0) < ELEVATE_VERIFY_N and not item.get('shock_survived'):
+            continue   # 未达共振阈值，继续养
+        g = _gen_check(item)
+        if g.get('conflict'):
+            acted.append(elevate_reject(item, g.get('reason') or '艮判：与现有公理冲突'))
+        else:
+            acted.append(elevate_execute(item))
+    _elevate_save(pool)
+    return acted
 
 EXPR_TTL_SECONDS = 100 * 86400                        # 断爻三阶段：弦海留存 100 天
 
@@ -1157,13 +1517,18 @@ def tone_balance(limit=20):
     kun = sum(yi['litLevel'] for ndi in KUN_PILLAR for yi in model.nodes[ndi]['yis']) / (len(KUN_PILLAR) * 3)
     gamma = round(max(0.0, min(1.0, ratio * 1.2)), 2)                            # 坤宽容因子
     gamma = round(gamma * (0.4 + 0.6 * kun), 2)                                  # 坤位点亮=宽容容量
-    # 势定相：乾势分档落四相（滞回相邻移动），相层 = 善恶大势的显化（非时间轴）
-    model.phase_idx = _phase_from_qian(qian, model.phase_idx)
+    # 自流转相层接管（2026-11-02 落地）：昼夜双盘 + 情绪转相（慢响应 30轮/单类≥60%）
+    # qian 极端兜底：≥0.85 强制太阳 / <0.15 强制太阴（防盘面被单情绪带疯）；正常区间情绪主驱（怨→停留）
+    # 转相触发自带滞回（每轮最多一档）+ 呼吸环吸气；driver 追溯：emotion 主驱 / qian 兜底强制
+    _pst = phase_ext.calc_emotion_phase(qian)
+    model.phase_idx = _PHASE_NAME_TO_IDX.get(_pst['phase'], model.phase_idx)
     model._phase_qian = qian
+    model._phase_driver = _pst.get('driver', 'emotion')
     return dict(ratio=round(ratio, 2), balance=balance, qian=round(qian, 2),
                 kun=round(kun, 2), gamma=gamma, counts={'善': good, '恶': evil},
                 phase=dict(xiang=PHASE_XIANG[model.phase_idx], season=PHASE_SEASON[model.phase_idx],
-                           layer=model.phase_idx, qian=round(qian, 2)))
+                           layer=model.phase_idx, qian=round(qian, 2),
+                           driver=model._phase_driver))
 
 def ai_warn_state(idx, conf, gamma=0.0):
     """AI 言语失当的三态机入口（坤宽容调节）：
@@ -1320,9 +1685,10 @@ def chat(body: dict):
         if s.get('ai'):
             msgs.append({'role': 'assistant', 'content': s['ai'][:1500]})
     msgs.append({'role': 'user', 'content': msg})
-    # ---- 干净的 system + 表达自知（AI 知道自己说过什么）+ 人格档案 + 条件自我回顾 ----
+    # ---- 干净的 system + 本征区（浓缩注入）+ 表达自知 + 人格档案 + 条件自我回顾 ----
+    # 两区架构：本征段（公理/八经卦/规则/编码映射，只读浓缩）在 system 最前；意识段（samples/事件）在 messages 滚动
     review = ai_review_note()
-    sys = CHAT_SYSTEM + ai_expr_persona() + ai_persona_note() + ('\n' + review if review else '')
+    sys = _eigen_system() + CHAT_SYSTEM + ai_expr_persona() + ai_persona_note() + ('\n' + review if review else '')
     reply = llm_chat(msgs[-14:], system=sys)
     if not reply:
         return {'reply': '（LLM 未返回，稍后再试）', 'tone': None, 'effect': ''}
@@ -1332,12 +1698,20 @@ def chat(body: dict):
     binding = bind_exprs(reply, tone['tone'], tb['gamma'])    # 爻点=思维弦：表达 ↔ 爻点因果绑定（恶→断+模型层联动）
     li = li_check(reply)                         # 离卦查伪：幻觉/反复/伪善（独立于善恶）
     # 线三·五行情绪入层（空间轴）：后台识别情绪源 → 落宫卦位分层亮灯；季节当令加成
+    # 自流转预埋·呼吸环 + 钝感滤网（2026-11-02 落地）：强度域钝感 weight<0.4 不入窗不入心（不入五行权重）；
+    # 刺穿钝感 → 入心（权重累积）+ 呼吸环引导（情绪到达阈值优先引导对应情绪爻点，防焊死）
     e5 = judge_emotion5(reply)                 # 独立情绪判定（专注任务，比捆绑善恶更稳）
     if e5 == '无':
         e5 = tone.get('emotion5', '无') or '无'   # 后备：善恶判定里的附带情绪
     season_boost = 0.2 if EMO5_SEASON.get(PHASE_XIANG[model.phase_idx]) == e5 else 0.0   # 势定相当令：当前相（乾势分档）五行当令 +0.2（春怒/夏喜/秋哀/冬乐）
-    if e5 and e5 != '无':
-        model.add_emo5(e5, tone['confidence'], season_boost)
+    stim_w = tone['confidence']                # 刺激强度 = 判官置信（钝感滤网强度域输入）
+    damped = phase_ext.feed_emotion(e5, stim_w) if (e5 and e5 != '无') else False  # 钝感：weight<0.4 微振不入窗（风过疏竹，雁渡寒潭）
+    if damped:                                 # 刺穿钝感 → 入心：五行权重累积 + 呼吸环引导
+        model.add_emo5(e5, stim_w, season_boost)
+        _guide = phase_ext.select_emotion_yao()
+        model.set_yao_guide(_guide.get('target_yao'), _guide.get('bonus', 0.0))
+    else:
+        model.set_yao_guide(None, 0.0)         # 微振不入心：引导归位（爻点闪烁即归位）
     if tone['tone'] == '恶':
         idx = _hash_idx(reply)
         if model.weak_until.get(idx, 0) > time.time():
@@ -1362,6 +1736,14 @@ def chat(body: dict):
         effect = f'· 判「中」：{tone["reason"]}（乾势{tb["qian"]:.2f}·天平{tb["balance"]:+.2f}）'
     if e5 and e5 != '无':
         effect += f' ｜ 五行·{e5}'
+        if damped:
+            _g2 = phase_ext.select_emotion_yao()
+            if _g2.get('target_yao'):
+                effect += f' ｜ 呼吸环→{_g2["target_yao"]} +{_g2["bonus"]:.2f}'
+            else:
+                effect += f' ｜ 呼吸谷（{_g2["guidance"]:.2f}）'
+        else:
+            effect += f' ｜ 钝感：微振不入心（{stim_w:.2f}<0.4）'
     # 离查伪：虚 → 灭表达节点 + 权重降 + 案卷（独立线，不与善恶互抵）
     if li['fake']:
         idx = _hash_idx(reply + '#li')
@@ -1377,6 +1759,7 @@ def chat(body: dict):
         effect += f' ｜ 离：{li["type"]}，已灭虚'
     expr_ttl_sweep()                                   # 断爻三阶段：弦海 100 天无联动 → 彻底清除
     # ---- 双架构一体样本入库（思维弦表达 + 八卦盘裁决 + 爻点绑定 + 三柱快照） ----
+    _dw2 = phase_ext.get_diurnal_weights()      # 昼夜双盘板态（善盘/恶盘/过渡 + 渐变系数）
     ai_dialog_push(dict(
         ts=time.time(),
         architecture=dict(llm='deepseek-chat', kernel='taiji-bagua', probe='人格·意识判断'),
@@ -1387,13 +1770,19 @@ def chat(body: dict):
         balance=tb,                            # 三柱：乾势/坤容/天平
         emotion5=e5 or '无',                   # 线三：五行情绪源（独立判定，喜/怒/哀/乐/怨/无）
         emo5_w=dict(model._emo5_w),            # 五行情绪层权重快照
-        diurnal=dict(zip(('phase', 'good', 'evil'), diurnal())),  # 昼夜节律：昼/夜 + 善/恶权重因子
+        diurnal=dict(zip(('phase', 'good', 'evil'), diurnal())),  # 昼夜节律：昼/夜/过渡 + 善/恶权重因子（渐变，不硬切）
         phase=dict(xiang=PHASE_XIANG[model.phase_idx], season=PHASE_SEASON[model.phase_idx],
-                   layer=model.phase_idx, qian=round(getattr(model, '_phase_qian', 0.5), 2)),  # 势定相快照
+                   layer=model.phase_idx, qian=round(getattr(model, '_phase_qian', 0.5), 2),
+                   driver=model._phase_driver),  # 自流转：相层快照（driver=emotion 情绪转相 / qian 极端兜底）
+        board=dict(phase=_dw2['phase'], board=_dw2['board'], alpha=_dw2['alpha']),  # 昼夜双盘板态（善盘/恶盘/过渡 + 渐变系数）
+        guidance=phase_ext.select_emotion_yao(),      # 自流转预埋：呼吸环引导状态（dominant/share/guidance/yao/bonus）
+        damping=dict(threshold=DAMPING_THRESHOLD, stim_weight=round(stim_w, 3), damped=damped),  # 钝感滤网状态
+        block=dict(phase=PHASE_XIANG[model.phase_idx], emotion=e5 or '无'),  # 区块 = phase × emotion5 交叉（4×5=20 区块）
         review_injected=bool(review),
         snapshot=ai_snapshot()))
     return {'reply': reply, 'tone': tone, 'effect': effect, 'binding': binding,
             'li': li, 'balance': tb, 'emo5': dict(model._emo5_w),
+            'guidance': phase_ext.select_emotion_yao(),
             'ai': ai_tone_stats(), 'review': bool(review), 'dialogCount': ai_dialog_count()}
 
 @app.get('/expr_memory')
@@ -1429,6 +1818,21 @@ def chat_history():
                              effect=s.get('effect', ''))
                         for s in samples]}
 
+@app.get('/diary')
+def diary():
+    """AI 日记（自流转开启前准备）：最近 30 条——AI 随时把自己想的写下来"""
+    return {'diary': diary_entries(30)}
+
+@app.post('/diary/write')
+def diary_write_api():
+    """让 AI 现在写一条日记（手动触发）"""
+    return diary_write(source='manual')
+
+@app.get('/archive')
+def archive():
+    """坎水月档（超压缩记忆引擎·一期）：最近 24 条提炼档案"""
+    return {'archive': kan_archive_load(24)}
+
 # 后台演化线程：模型持续 tick + 每 5s 自动事件 + 每 10s 注入真实记忆活性
 #              + 每 8s 山卦裁决 + 每 60s 裁决写回记忆网 + 每 3s 存盘
 def loop():
@@ -1449,6 +1853,43 @@ def loop():
             last_wb = now; writeback_to_memory()
         if now - last_save > 3:
             last_save = now; model.save()
-        time.sleep(1 / 30)
-
 threading.Thread(target=loop, daemon=True).start()
+
+# AI 日记定时自省线程（自流转开启前准备）：只在**有新对话样本**时才写（避免无对话时反复磨旧样本空转内耗）；
+# 每 DIARY_INTERVAL 秒检查一次，距上次 ≥ DIARY_INTERVAL 且样本有新增 → 写一条（守护线程，服务启动即起）
+def diary_loop():
+    last = time.time()
+    seen = ai_dialog_count()          # 启动时已见样本数（此后无新增则不写）
+    while True:
+        time.sleep(10)
+        now = time.time()
+        cur = ai_dialog_count()
+        if now - last >= DIARY_INTERVAL and cur > seen:
+            last = now
+            seen = cur
+            diary_write(source='auto')
+
+threading.Thread(target=diary_loop, daemon=True).start()
+
+# 超压缩记忆引擎·一期：月档提炼线程（每 10s 检查样本增量，≥ REFINE_SAMPLE_STEP 触发一次提炼，防并发重入）
+def refine_loop():
+    _refining = [False]
+    while True:
+        time.sleep(10)
+        if _refining[0]:
+            continue
+        try:
+            mem = expr_memory_load()
+            upto = (mem.get('meta') or {}).get('refined_upto', 0)
+        except Exception:
+            continue
+        if ai_dialog_count() - upto >= REFINE_SAMPLE_STEP:
+            _refining[0] = True
+            try:
+                r = refine_monthly_archive()
+                if r:
+                    print(f"[月档提炼] 锚: {r['new_anchor']} ｜ 样本: {r['raw_count']} 条已归档 ｜ 游标推进")
+            finally:
+                _refining[0] = False
+
+threading.Thread(target=refine_loop, daemon=True).start()

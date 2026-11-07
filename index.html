@@ -634,6 +634,7 @@ function updateDataPanel(){
   const total=online&&stateInfo ? s.total : 96;
   let h=`<div style="color:#ffd76a;font-weight:bold;">⚡ 实时逻辑数据 · ${new Date().toLocaleTimeString()}${online?'':' (本地降级)'}</div>`;
   h+=`<div>运行：${elMode==='good'?'善盘·正旋':'恶盘·倒旋'} ｜ ${em.label}${online&&s.emotionWeights?`<span style="color:#9fc0e8;">（${Object.entries(s.emotionWeights).filter(x=>x[1]>0).map(x=>`${EMOTIONS[x[0]].label}${Math.round(x[1]*100)}%`).join('+')}）</span>`:''} ｜ 共振场 ${(reso*100)|0}% ｜ 点亮 ${lit}/${total}</div>`;
+  h+=`<div style="color:#c9a0dc;">本征区 v${s.eigen? s.eigen.version : '-'}${s.eigen&&s.eigen.updated?`（${s.eigen.updated}）`:''} ｜ 意识区动态流转</div>`;
   h+=`<div style="color:#9fc0e8;">四象参数：reso=${ep.reso.toFixed(2)} drive=${ep.drive} litThr=${ep.litThr} fold=${ep.fold}</div>`;
   h+=`<div style="color:#ffd76a;">裁决#${v.round||0} 艮判${((v.active||0)*100)|0}% 巽查${((v.xun||0)*100)|0}% 兑归${((v.dui||0)*100)|0}% 震降${((v.zhen||0)*100)|0}%</div>`;
   if(v.llmNote) h+=`<div style="color:#8ad8ff;margin-top:3px;">⚡ 艮判（LLM）：${v.llmNote}</div>`;
@@ -878,6 +879,13 @@ if(location.search.includes('trend')){ try{ for(let i=0;i<60;i++) sampleTrend();
     <button id="chatSend">发送</button>
   </div>
 </div>
+<!-- ===== AI 日记窗口：AI 随时把自己想的写下来（自流转开启前准备） ===== -->
+<div id="diaryFab" title="AI 日记">📖</div>
+<div id="diaryPanel">
+  <div id="diaryHead"><span>AI 日记 · 随时把想法写下来</span><span id="diaryClose">×</span></div>
+  <div id="diaryBody"></div>
+  <div id="diaryFoot"><button id="diaryWrite">✎ 让 AI 写一条</button></div>
+</div>
 <style>
 #chatFab{position:fixed;right:16px;bottom:16px;width:46px;height:46px;border-radius:23px;cursor:pointer;z-index:99;
   background:linear-gradient(135deg,#0f2a1f,#0b3b2e);border:1px solid rgba(58,255,217,.45);color:#3affd9;
@@ -900,6 +908,26 @@ if(location.search.includes('trend')){ try{ for(let i=0;i<60;i++) sampleTrend();
 #chatSend{background:linear-gradient(135deg,#0f2a1f,#0b3b2e);border:1px solid rgba(58,255,217,.4);color:#3affd9;
   border-radius:6px;padding:0 14px;font-size:12px;cursor:pointer;}
 #chatSend:hover{background:#123f31;}
+#diaryFab{position:fixed;right:16px;bottom:508px;width:42px;height:42px;border-radius:21px;cursor:pointer;z-index:98;
+  background:linear-gradient(135deg,#1a2f52,#123a4a);border:1px solid rgba(90,160,255,.45);color:#aac8ff;font-size:17px;
+  display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(60,120,255,.25);}
+#diaryFab:hover{box-shadow:0 4px 24px rgba(90,160,255,.4);}
+#diaryPanel{position:fixed;right:16px;bottom:564px;width:340px;height:400px;max-height:calc(100vh - 584px);z-index:98;display:none;flex-direction:column;
+  background:rgba(8,14,30,.96);border:1px solid rgba(150,180,255,.25);border-radius:10px;backdrop-filter:blur(8px);
+  overflow:hidden;box-shadow:0 0 40px rgba(60,120,255,.2);}
+#diaryHead{padding:9px 12px;border-bottom:1px solid rgba(90,160,255,.25);color:#e8f2ff;font-size:13px;font-weight:bold;
+  display:flex;justify-content:space-between;align-items:center;background:rgba(20,32,56,.7);}
+#diaryClose{cursor:pointer;color:#5a7aa0;font-size:16px;padding:0 4px;}
+#diaryClose:hover{color:#ff8a8a;}
+#diaryBody{flex:1;overflow-y:auto;padding:10px 12px;font-size:12px;line-height:1.7;scrollbar-width:thin;}
+#diaryBody .d{color:#cfe3ff;background:rgba(90,160,255,.06);border-left:2px solid #5aa0ff;padding:6px 9px;margin-bottom:8px;
+  border-radius:0 6px 6px 0;white-space:pre-wrap;}
+#diaryBody .dt{color:#5a7aa0;font-size:10px;margin-bottom:2px;}
+#diaryBody .tag{color:#8a6dff;}
+#diaryFoot{display:flex;gap:6px;padding:8px;border-top:1px solid rgba(90,160,255,.2);}
+#diaryWrite{flex:1;background:linear-gradient(135deg,#1a2f52,#123a4a);border:1px solid rgba(90,160,255,.4);color:#aac8ff;
+  border-radius:6px;padding:7px 0;font-size:12px;cursor:pointer;}
+#diaryWrite:hover{background:#1d3a5e;}
 </style>
 <script>
 (function(){
@@ -934,6 +962,33 @@ if(location.search.includes('trend')){ try{ for(let i=0;i<60;i++) sampleTrend();
       .catch(e=>{ say('a','（对话服务未连接，先启动后端）'); send.disabled=false; });
   };
   send.onclick=go; inp.onkeydown=e=>{ if(e.key==='Enter') go(); };
+})();
+(function(){
+  // AI 日记窗口：随时把 AI 的想法展示出来，可手动让 AI 写一条（自流转开启前准备）
+  const fab=document.getElementById('diaryFab'), panel=document.getElementById('diaryPanel'),
+        body=document.getElementById('diaryBody'), wr=document.getElementById('diaryWrite'),
+        close=document.getElementById('diaryClose');
+  const fmt=(ts)=>{ const d=new Date(ts*1000), p=n=>String(n).padStart(2,'0');
+    return `${d.getMonth()+1}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; };
+  const loadDiary=()=>{
+    fetch(API+'/diary').then(r=>r.json()).then(d=>{
+      const items=d.diary||[]; body.innerHTML='';
+      if(!items.length){ body.innerHTML='<div class="d" style="color:#5a7aa0;">（日记还空着——AI 会随对话慢慢写下想法。）</div>'; return; }
+      [...items].reverse().forEach(it=>{
+        const row=document.createElement('div');
+        const tag=it.source==='manual'?'✎手动':'自省';
+        row.innerHTML=`<div class="dt">${fmt(it.ts)} <span class="tag">${tag}</span></div><div class="d"></div>`;
+        row.querySelector('.d').textContent=it.content; body.appendChild(row);
+      });
+      body.scrollTop=body.scrollHeight;
+    }).catch(()=>{ body.innerHTML='<div class="d" style="color:#5a7aa0;">（后端未连接）</div>'; });
+  };
+  fab.onclick=()=>{ panel.style.display=panel.style.display==='flex'?'none':'flex'; if(panel.style.display==='flex') loadDiary(); };
+  close.onclick=()=>{ panel.style.display='none'; };
+  wr.onclick=()=>{ wr.disabled=true; wr.textContent='写日记中…';
+    fetch(API+'/diary/write',{method:'POST'}).then(r=>r.json()).then(()=>{ loadDiary(); wr.disabled=false; wr.textContent='✎ 让 AI 写一条'; })
+      .catch(()=>{ wr.disabled=false; wr.textContent='✎ 让 AI 写一条'; }); };
+  setInterval(()=>{ if(panel.style.display==='flex') loadDiary(); }, 10000);   // 打开时 10s 轮询
 })();
 </script>
 </body>
